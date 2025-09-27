@@ -2,6 +2,7 @@ package gg.departed.basic.entries.dialogue.messengers.option
 
 import gg.departed.basic.entries.dialogue.Option
 import gg.departed.basic.entries.dialogue.OptionDialogueEntry
+import com.typewritermc.engine.paper.entry.matches
 import com.typewritermc.core.interaction.InteractionBoundState
 import com.typewritermc.core.interaction.InteractionContext
 import com.typewritermc.engine.paper.entry.Modifier

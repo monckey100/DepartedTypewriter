@@ -17,7 +17,7 @@ import org.bukkit.entity.Player
 import java.time.Duration
 import kotlin.reflect.KClass
 
-@Entry("option", "Display a list of options to the player", "#4CAF50", "fa6-solid:list")
+@Entry("wasd_option", "Display a list of WASD options to the player", "#4CAF50", "fa6-solid:list")
 @ContextKeys(OptionContextKeys::class)
 /**
  * The `Option Dialogue` action displays a list of options to the player to choose from. This action provides you with the ability to give players choices that affect the outcome of the game.
