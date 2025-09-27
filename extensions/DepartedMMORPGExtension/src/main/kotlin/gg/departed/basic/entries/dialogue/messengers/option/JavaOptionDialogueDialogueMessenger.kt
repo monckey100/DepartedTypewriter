@@ -8,7 +8,6 @@ import com.typewritermc.core.interaction.InteractionContext
 import com.typewritermc.core.utils.around
 import com.typewritermc.engine.paper.entry.Modifier
 import com.typewritermc.engine.paper.entry.dialogue.*
-import com.typewritermc.engine.paper.entry.dialogue.MessengerState
 import com.typewritermc.engine.paper.entry.entries.EventTrigger
 import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
 import com.typewritermc.engine.paper.interaction.chatHistory
@@ -19,7 +18,6 @@ import net.kyori.adventure.text.JoinConfiguration
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder
 import org.bukkit.Bukkit
 import org.bukkit.Location
-import org.bukkit.attribute.Attribute
 import org.bukkit.entity.ArmorStand
 import org.bukkit.entity.EntityType
 import org.bukkit.entity.Player
@@ -35,6 +33,7 @@ import com.github.retrooper.packetevents.event.PacketListenerAbstract
 import com.github.retrooper.packetevents.event.PacketListenerPriority
 import com.github.retrooper.packetevents.event.PacketReceiveEvent
 import com.github.retrooper.packetevents.protocol.packettype.PacketType
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerInput
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientSteerVehicle
 
 import java.time.Duration
@@ -83,8 +82,6 @@ private val delayOptionShow: Int by snippet(
     "The delay in milliseconds between each option being shown."
 )
 
-private val debugInput: Boolean by snippet("dialogue.option.debugInput", true)
-
 class JavaOptionDialogueDialogueMessenger(
     player: Player,
     context: InteractionContext,
@@ -121,12 +118,15 @@ class JavaOptionDialogueDialogueMessenger(
             playTime = if (!value) Duration.ZERO else totalDuration
         }
 
-    // --- ArmorStand mount + PacketEvents input ---
-    private var stand: ArmorStand? = null
+    // --- Server-side mount + PacketEvents input ---
+    private var mount: ArmorStand? = null
     private var packetListener: PacketListenerAbstract? = null
-    private val pluginRef: JavaPlugin by lazy { resolveAnyJavaPlugin() }
+    private val hasPacketEvents by lazy {
+        Bukkit.getPluginManager().getPlugin("packetevents") != null ||
+                Bukkit.getPluginManager().getPlugin("PacketEvents") != null
+    }
 
-    private val steerDeadzone = 0.08f
+    private val steerDeadzone = 0.35f //0.35f
     private var nextInputAtMs: Long = 0
 
     override fun init() {
@@ -145,7 +145,7 @@ class JavaOptionDialogueDialogueMessenger(
             confirmAndClose()
         }
 
-        // Start mount-based control (ensure main thread for entity ops)
+        // Start mount-based control
         startMountControl()
     }
 
@@ -201,9 +201,6 @@ class JavaOptionDialogueDialogueMessenger(
 
         val component = player.chatHistory.composeDarkMessage(message)
         player.sendMessage(component)
-
-        // Hide "Press Shift to dismount"
-        player.sendActionBar(Component.text(" "))
     }
 
     private fun formatOptions(rawText: String): Component {
@@ -251,259 +248,152 @@ class JavaOptionDialogueDialogueMessenger(
         selectedIndex = newIndex
     }
 
-    // --------------------- Mount control ---------------------
-    private fun startMountControl() {
-        if (Bukkit.isPrimaryThread()) {
-            startMountControlSync()
-        } else {
-            Bukkit.getScheduler().runTask(pluginRef, Runnable { startMountControlSync() })
-        }
+    // --------------------- Scheduler helper ---------------------
+    private fun pluginHost(): JavaPlugin {
+        (Bukkit.getPluginManager().getPlugin("PacketEvents") as? JavaPlugin)?.let { return it }
+        (Bukkit.getPluginManager().getPlugin("packetevents") as? JavaPlugin)?.let { return it }
+        Bukkit.getPluginManager().plugins.firstOrNull { it is JavaPlugin }?.let { return it as JavaPlugin }
+        throw IllegalStateException("No JavaPlugin found to schedule tasks")
+    }
+    private fun runSync(task: () -> Unit) {
+        Bukkit.getScheduler().runTask(pluginHost(), Runnable { task() })
     }
 
-    private fun startMountControlSync() {
-        if (stand?.isValid == true) {
-            if (player.vehicle != stand) stand!!.addPassenger(player)
-        } else {
-            val base: Location = player.location.clone()
-            val spawnLoc = base.clone().add(0.0, -0.4, 0.0)
-            val asStand = player.world.spawnEntity(spawnLoc, EntityType.ARMOR_STAND) as ArmorStand
-            asStand.setGravity(false)
-            asStand.isVisible = false
-            asStand.isInvulnerable = true
-            asStand.isMarker = true
-            asStand.isCollidable = false
-            asStand.customName = null
-            asStand.setBasePlate(false)
-            asStand.setArms(false)
-            asStand.setSmall(true)
-            asStand.getAttribute(Attribute.MAX_HEALTH)?.baseValue = 0.0
-            asStand.addPassenger(player)
-            stand = asStand
-        }
+    // --------------------- Mount control ---------------------
+    private fun startMountControl() {
+        runSync {
+            // Spawn invisible marker ArmorStand and mount the player (server-side)
+            if (mount?.isValid == true) {
+                if (player.vehicle != mount) mount!!.addPassenger(player)
+            } else {
+                val baseLoc: Location = player.location.clone()
+                baseLoc.add(0.0, 0.380, 0.0) // 0.375
+                val asStand = player.world.spawnEntity(baseLoc, EntityType.ARMOR_STAND) as ArmorStand
+                asStand.isSilent = true
+                asStand.isInvisible = true
+                asStand.isInvulnerable = true
+                asStand.setGravity(false)
+                asStand.isMarker = true
+                asStand.isCollidable = false
+                asStand.customName = null
+                asStand.setBasePlate(false)
+                asStand.setArms(false)
+                asStand.setSmall(true)
+                asStand.addPassenger(player)
+                mount = asStand
+            }
 
-        registerPacketEventsListener()
+            if (hasPacketEvents) registerPacketEventsListener() else {
+                player.sendMessage(Component.text("WASD menu requires PacketEvents; Jump/Shift will still confirm."))
+            }
+        }
     }
 
     private fun stopMountControl() {
-        if (Bukkit.isPrimaryThread()) {
-            stopMountControlSync()
-        } else {
-            Bukkit.getScheduler().runTask(pluginRef, Runnable { stopMountControlSync() })
-        }
-    }
-
-    private fun stopMountControlSync() {
         unregisterPacketEventsListener()
-
-        stand?.let { s ->
-            try {
-                if (player.vehicle == s) player.leaveVehicle()
-            } catch (_: Throwable) {}
-            try {
-                if (!s.isDead) s.remove()
-            } catch (_: Throwable) {}
+        runSync {
+            // dismount & remove anchor
+            mount?.let { m ->
+                try {
+                    if (player.vehicle == m) player.leaveVehicle()
+                } catch (_: Throwable) {}
+                try {
+                    if (!m.isDead) m.remove()
+                } catch (_: Throwable) {}
+            }
+            mount = null
         }
-        stand = null
     }
 
     private fun registerPacketEventsListener() {
         if (packetListener != null) return
 
-        packetListener = object : PacketListenerAbstract(PacketListenerPriority.LOWEST) {
+        packetListener = object : PacketListenerAbstract(PacketListenerPriority.HIGHEST) {
             override fun onPacketReceive(event: PacketReceiveEvent) {
-                val pt = event.packetType
-                if (pt != PacketType.Play.Client.STEER_VEHICLE && pt != PacketType.Play.Client.PLAYER_INPUT) return
+                val type = event.packetType
+                if (type != PacketType.Play.Client.STEER_VEHICLE &&
+                    type != PacketType.Play.Client.PLAYER_INPUT) return
 
                 val user = event.user ?: return
                 if (user.uuid != player.uniqueId) return
                 if (state != MessengerState.RUNNING) return
 
-                val s = stand ?: return
-                if (!s.isValid || player.vehicle != s) return
+                val m = mount ?: return
+                if (!m.isValid || player.vehicle != m) return
 
-                val input = readPlayerInput(event)
-                // Cancel so no real dismount/move happens
-                event.setCancelled(true)
+                // Extract inputs depending on the packet actually received
+                var forward = 0.0f
+                var sideways = 0.0f
+                var confirm = false
 
-                handleMenuInput(input.forward, input.sideways, input.jump, input.unmount)
+                when (type) {
+                    PacketType.Play.Client.STEER_VEHICLE -> {
+                        val w = WrapperPlayClientSteerVehicle(event)
+                        sideways = w.sideways           // A (-) … D (+)
+                        forward = w.forward             // S (-) … W (+)
+                        confirm = w.isJump || w.isUnmount   // SPACE or SHIFT
+                    }
+                    PacketType.Play.Client.PLAYER_INPUT -> {
+                        val w = WrapperPlayClientPlayerInput(event)
+                        if (w.isLeft) sideways = -1.0f
+                        else if (w.isRight) sideways = 1.0f
+                        else sideways = 0f
+                        if (w.isForward) forward = 1.0f
+                        else if (w.isBackward) forward = -1.0f
+                        else forward = 0f
+                        confirm = w.isJump || w.isShift // SPACE or SHIFT
+                    }
+                    else -> return
+                }
+
+                val now = System.currentTimeMillis()
+
+                // Confirm → close & clean up (cancel only the current packet)
+                if (confirm) {
+                    event.isCancelled = true
+                    runSync { confirmAndClose() }
+                    return
+                }
+
+                // WASD navigation (dominant axis), debounce repeats
+                if (now >= nextInputAtMs && usableOptions.size > 1) {
+                    var acted = false
+                    if (kotlin.math.abs(forward) >= kotlin.math.abs(sideways)) {
+                        if (forward > steerDeadzone) {      // W → Up
+                            moveSelection(-1); acted = true
+                        } else if (forward < -steerDeadzone) { // S → Down
+                            moveSelection(+1); acted = true
+                        }
+                    } else {
+                        if (sideways < -steerDeadzone) {    // A → Up
+                            moveSelection(-1); acted = true
+                        } else if (sideways > steerDeadzone) { // D → Down
+                            moveSelection(+1); acted = true
+                        }
+                    }
+                    if (acted) {
+                        nextInputAtMs = now + inputCooldownMs
+                        runSync { displayMessage(playTime) }
+                    }
+                }
             }
+
         }
 
-        if (Bukkit.isPrimaryThread()) {
-            PacketEvents.getAPI().eventManager.registerListener(packetListener!!)
-        } else {
-            Bukkit.getScheduler().runTask(pluginRef, Runnable {
-                PacketEvents.getAPI().eventManager.registerListener(packetListener!!)
-            })
-        }
+        PacketEvents.getAPI().eventManager.registerListener(packetListener!!)
     }
 
     private fun unregisterPacketEventsListener() {
-        val listener = packetListener ?: return
-        packetListener = null
-        if (Bukkit.isPrimaryThread()) {
-            PacketEvents.getAPI().eventManager.unregisterListener(listener)
-        } else {
-            Bukkit.getScheduler().runTask(pluginRef, Runnable {
-                PacketEvents.getAPI().eventManager.unregisterListener(listener)
-            })
-        }
-    }
-
-    private data class Input(val forward: Float, val sideways: Float, val jump: Boolean, val unmount: Boolean)
-
-    private fun readPlayerInput(event: PacketReceiveEvent): Input {
-        val pt = event.packetType
-        // Prefer SteerVehicle wrapper
-        if (pt == PacketType.Play.Client.STEER_VEHICLE) {
-            val w = WrapperPlayClientSteerVehicle(event)
-            return coerceInputFromWrapper(w)
-        }
-
-        // Try WrapperPlayClientPlayerInput reflectively (not all builds include it)
-        if (pt == PacketType.Play.Client.PLAYER_INPUT) {
+        packetListener?.let {
             try {
-                val cls = Class.forName("com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerInput")
-                val ctor = cls.getConstructor(PacketReceiveEvent::class.java)
-                val w = ctor.newInstance(event)
-                return coerceInputFromAnyWrapper(w)
-            } catch (_: Throwable) {
-                // Fall back to treating it as SteerVehicle shape
-                try {
-                    val wAlt = WrapperPlayClientSteerVehicle(event)
-                    return coerceInputFromWrapper(wAlt)
-                } catch (_: Throwable) { /* fallthrough */ }
-            }
+                PacketEvents.getAPI().eventManager.unregisterListener(it)
+            } catch (_: Throwable) {}
         }
-
-        return Input(0f, 0f, false, false)
-    }
-
-    // Uses typed SteerVehicle wrapper
-    private fun coerceInputFromWrapper(w: WrapperPlayClientSteerVehicle): Input {
-        var sideways = w.sideways
-        var forward = w.forward
-        var jump = w.isJump
-        var unmount = w.isUnmount
-
-        // flags fallback
-        try {
-            val flagsMethod = w.javaClass.getMethod("getFlags")
-            val flags = (flagsMethod.invoke(w) as? Number)?.toInt()
-            if (flags != null) {
-                val res = deriveFromFlags(sideways, forward, flags)
-                sideways = res.first; forward = res.second; jump = jump || res.third; unmount = unmount || res.fourth
-            }
-        } catch (_: Throwable) {
-            // boolean accessors fallback
-            var flags = 0
-            try { if (w.javaClass.getMethod("isLeft").invoke(w) as Boolean) flags = flags or 0x01 } catch (_: Throwable) {}
-            try { if (w.javaClass.getMethod("isRight").invoke(w) as Boolean) flags = flags or 0x02 } catch (_: Throwable) {}
-            try { if (w.javaClass.getMethod("isForward").invoke(w) as Boolean) flags = flags or 0x04 } catch (_: Throwable) {}
-            try { if (w.javaClass.getMethod("isBackward").invoke(w) as Boolean) flags = flags or 0x08 } catch (_: Throwable) {}
-            try { if (w.javaClass.getMethod("isJump").invoke(w) as Boolean) flags = flags or 0x10 } catch (_: Throwable) {}
-            try { if (w.javaClass.getMethod("isUnmount").invoke(w) as Boolean) flags = flags or 0x20 } catch (_: Throwable) {}
-            if (flags != 0) {
-                val res = deriveFromFlags(sideways, forward, flags)
-                sideways = res.first; forward = res.second; jump = jump || res.third; unmount = unmount || res.fourth
-            }
-        }
-        return Input(forward, sideways, jump, unmount)
-    }
-
-    // Uses reflection against any wrapper (PLAYER_INPUT or otherwise)
-    private fun coerceInputFromAnyWrapper(w: Any): Input {
-        var sideways = try { (w.javaClass.getMethod("getSideways").invoke(w) as Number).toFloat() } catch (_: Throwable) { 0f }
-        var forward  = try { (w.javaClass.getMethod("getForward").invoke(w) as Number).toFloat() } catch (_: Throwable) { 0f }
-        var jump     = try { w.javaClass.getMethod("isJump").invoke(w) as Boolean } catch (_: Throwable) { false }
-        var unmount  = try { w.javaClass.getMethod("isUnmount").invoke(w) as Boolean } catch (_: Throwable) { false }
-
-        // flags (preferred)
-        try {
-            val flagsMethod = try { w.javaClass.getMethod("getFlags") } catch (_: Throwable) { null }
-            val flags = when {
-                flagsMethod != null -> (flagsMethod.invoke(w) as? Number)?.toInt()
-                else -> null
-            }
-            if (flags != null) {
-                val res = deriveFromFlags(sideways, forward, flags)
-                sideways = res.first; forward = res.second; jump = jump || res.third; unmount = unmount || res.fourth
-            }
-        } catch (_: Throwable) {
-            // boolean directional accessors
-            var flags = 0
-            try { if (w.javaClass.getMethod("isLeft").invoke(w) as Boolean) flags = flags or 0x01 } catch (_: Throwable) {}
-            try { if (w.javaClass.getMethod("isRight").invoke(w) as Boolean) flags = flags or 0x02 } catch (_: Throwable) {}
-            try { if (w.javaClass.getMethod("isForward").invoke(w) as Boolean) flags = flags or 0x04 } catch (_: Throwable) {}
-            try { if (w.javaClass.getMethod("isBackward").invoke(w) as Boolean) flags = flags or 0x08 } catch (_: Throwable) {}
-            try { if (w.javaClass.getMethod("isJump").invoke(w) as Boolean) flags = flags or 0x10 } catch (_: Throwable) {}
-            try { if (w.javaClass.getMethod("isUnmount").invoke(w) as Boolean) flags = flags or 0x20 } catch (_: Throwable) {}
-            if (flags != 0) {
-                val res = deriveFromFlags(sideways, forward, flags)
-                sideways = res.first; forward = res.second; jump = jump || res.third; unmount = unmount || res.fourth
-            }
-        }
-        return Input(forward, sideways, jump, unmount)
-    }
-
-    // Map flags to axes (fallback when floats are ~0). Bits chosen to match typical wrappers:
-    // 0x01: left, 0x02: right, 0x04: forward (W), 0x08: backward (S), 0x10: jump, 0x20: unmount
-    private fun deriveFromFlags(sidewaysIn: Float, forwardIn: Float, flags: Int): Quad<Float, Float, Boolean, Boolean> {
-        var sideways = sidewaysIn
-        var forward = forwardIn
-        if (abs(sideways) < 1e-4 && abs(forward) < 1e-4) {
-            if ((flags and 0x01) != 0) sideways -= 1f
-            if ((flags and 0x02) != 0) sideways += 1f
-            if ((flags and 0x04) != 0) forward += 1f
-            if ((flags and 0x08) != 0) forward -= 1f
-        }
-        val jump = (flags and 0x10) != 0
-        val unmount = (flags and 0x20) != 0
-        return Quad(sideways, forward, jump, unmount)
-    }
-
-    private data class Quad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
-
-    private fun handleMenuInput(forward: Float, sideways: Float, jump: Boolean, unmount: Boolean) {
-        if (debugInput && (jump || unmount || kotlin.math.abs(forward) > 0.001f || kotlin.math.abs(sideways) > 0.001f)) {
-            player.sendActionBar(Component.text("WASD f=%.2f s=%.2f j=%s u=%s".format(forward, sideways, jump, unmount)))
-        }
-        val now = System.currentTimeMillis()
-
-        // Confirm with Jump or Shift
-        if (jump || unmount) {
-            Bukkit.getScheduler().runTask(pluginRef, Runnable { confirmAndClose() })
-            return
-        }
-
-        if (usableOptions.size <= 1) return
-        if (now < nextInputAtMs) return
-
-        var acted = false
-        // Prefer forward/back first (W/S), then sideways (A/D)
-        if (kotlin.math.abs(forward) > steerDeadzone) {
-            if (forward > 0f) {      // W → Up
-                moveSelection(-1); acted = true
-            } else if (forward < 0f) { // S → Down
-                moveSelection(+1); acted = true
-            }
-        } else if (kotlin.math.abs(sideways) > steerDeadzone) {
-            if (sideways < 0f) {    // A → Up
-                moveSelection(-1); acted = true
-            } else if (sideways > 0f) { // D → Down
-                moveSelection(+1); acted = true
-            }
-        }
-
-        if (acted) {
-            nextInputAtMs = now + inputCooldownMs
-            Bukkit.getScheduler().runTask(pluginRef, Runnable { displayMessage(playTime) })
-        }
+        packetListener = null
     }
 
     private fun confirmAndClose() {
-        animationComplete = true
-        state = MessengerState.FINISHED
+        completeOrFinish()
         stopMountControl()
     }
 
@@ -512,8 +402,9 @@ class JavaOptionDialogueDialogueMessenger(
     private fun onPlayerJump(e: PlayerJumpEvent) {
         if (e.player.uniqueId != player.uniqueId) return
         if (state != MessengerState.RUNNING) return
-        val s = stand
-        if (s == null || e.player.vehicle != s) return
+        val m = mount ?: return
+        if (player.vehicle != m) return
+        // Use Jump as confirm; prevent actual motion
         e.isCancelled = true
         confirmAndClose()
     }
@@ -522,8 +413,8 @@ class JavaOptionDialogueDialogueMessenger(
     private fun onSneak(e: PlayerToggleSneakEvent) {
         if (e.player.uniqueId != player.uniqueId) return
         if (state != MessengerState.RUNNING) return
-        val s = stand
-        if (s == null || e.player.vehicle != s) return
+        val m = mount ?: return
+        if (player.vehicle != m) return
         if (!e.isSneaking) return
         e.isCancelled = true
         confirmAndClose()
@@ -533,9 +424,9 @@ class JavaOptionDialogueDialogueMessenger(
     private fun onPlayerMove(event: PlayerMoveEvent) {
         if (event.player.uniqueId != player.uniqueId) return
         if (state != MessengerState.RUNNING) return
-        val s = stand
+        val m = mount
         // If for some reason we aren't mounted (plugin conflict), hard-lock position but keep look
-        if (s == null || event.player.vehicle != s) {
+        if (m == null || event.player.vehicle != m) {
             val from = event.from
             val to = event.to ?: return
             if (!event.hasChangedPosition()) return
@@ -551,20 +442,5 @@ class JavaOptionDialogueDialogueMessenger(
         confirmationKeyHandler?.dispose()
         confirmationKeyHandler = null
         stopMountControl()
-    }
-
-    // Resolve a usable JavaPlugin instance when this class isn't loaded by a plugin classloader.
-    private fun resolveAnyJavaPlugin(): JavaPlugin {
-        val pm = Bukkit.getPluginManager()
-
-        // Prefer Typewriter if present (this messenger is typically invoked from it)
-        pm.getPlugin("Typewriter")?.let { if (it is JavaPlugin && it.isEnabled) return it }
-
-        // Fallback: any enabled JavaPlugin
-        val firstEnabled = pm.plugins.firstOrNull { it is JavaPlugin && it.isEnabled } as? JavaPlugin
-        if (firstEnabled != null) return firstEnabled
-
-        // Last resort: throw
-        throw IllegalStateException("No enabled JavaPlugin found for scheduling tasks.")
     }
 }
