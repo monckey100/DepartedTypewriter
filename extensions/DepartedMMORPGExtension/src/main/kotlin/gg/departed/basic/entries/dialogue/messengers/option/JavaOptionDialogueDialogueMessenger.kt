@@ -267,7 +267,7 @@ class JavaOptionDialogueDialogueMessenger(
                 if (player.vehicle != mount) mount!!.addPassenger(player)
             } else {
                 val baseLoc: Location = player.location.clone()
-                baseLoc.add(0.0, 0.380, 0.0) // 0.375
+                baseLoc.add(0.0, 0.6, 0.0) // 0.375
                 val asStand = player.world.spawnEntity(baseLoc, EntityType.ARMOR_STAND) as ArmorStand
                 asStand.isSilent = true
                 asStand.isInvisible = true
