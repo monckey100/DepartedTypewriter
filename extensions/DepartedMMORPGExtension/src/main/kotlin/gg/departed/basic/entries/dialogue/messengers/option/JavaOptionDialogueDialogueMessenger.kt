@@ -347,10 +347,9 @@ class JavaOptionDialogueDialogueMessenger(
                 }
 
                 val now = System.currentTimeMillis()
-
+                event.isCancelled = true // always cancel the packet
                 // Confirm → close & clean up (cancel only the current packet)
                 if (confirm) {
-                    event.isCancelled = true
                     runSync { confirmAndClose() }
                     return
                 }
