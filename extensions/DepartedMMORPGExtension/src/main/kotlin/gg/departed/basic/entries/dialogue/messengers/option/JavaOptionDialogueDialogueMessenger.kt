@@ -92,6 +92,10 @@ class JavaOptionDialogueDialogueMessenger(
     private var confirmationKeyHandler: ConfirmationKeyHandler? = null
     private val typeDuration = entry.duration.get(player)
 
+    private val voiceActor = entry.voice.get(player) // Voice actor
+    private val voiceText = entry.voicetext.get(player) // override voice text
+    private val stopVoice = entry.stopvoice.get(player) // stop previous talking
+
     private var selectedIndex = 0
         set(value) {
             field = value
@@ -139,6 +143,22 @@ class JavaOptionDialogueDialogueMessenger(
         val typingDuration = typingDurationType.totalDuration(rawText, typeDuration)
         val optionsShowingDuration = Duration.ofMillis(usableOptions.size * delayOptionShow.toLong())
         totalDuration = typingDuration + optionsShowingDuration
+
+        // --- NEW: voice control (executes only once when dialogue starts) ---
+        // Choose the line to speak: voiceText (if not empty) else the regular parsedText
+        val chosenVoiceLine = (voiceText?.takeIf { it.isNotBlank() } ?: parsedText)
+            .parsePlaceholders(player)
+            .stripped()
+
+        // If requested, stop any ongoing voice first
+        if (stopVoice == true) {
+            runSync { Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") }
+        }
+
+        // Start talking if we have an actor and something to say
+        if (!voiceActor.isNullOrBlank() && chosenVoiceLine.isNotBlank()) {
+           runSync { Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "talkchar $voiceActor ${player.name} $chosenVoiceLine") }
+        }
 
         super.init()
         confirmationKeyHandler = confirmationKey.handler(player) {

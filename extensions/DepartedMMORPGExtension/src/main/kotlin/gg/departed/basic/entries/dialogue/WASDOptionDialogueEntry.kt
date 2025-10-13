@@ -36,6 +36,12 @@ class OptionDialogueEntry(
     @Placeholder
     @Colored
     val text: Var<String> = ConstVar(""),
+    @Help("Voice Actor for the Departed RPG engine")
+    val voice: Var<String> = ConstVar(""),
+    @Help("Voice Text, if empty it will use the regular text.")
+    val voicetext: Var<String> = ConstVar(""),
+    @Help("Stop previous voices from playing.")
+    val stopvoice: Var<Boolean> = ConstVar(true),
     val options: List<Option> = emptyList(),
     @Help("The duration it takes to type out the message. If the duration is zero, the message will be displayed instantly.")
     val duration: Var<Duration> = ConstVar(Duration.ZERO),
