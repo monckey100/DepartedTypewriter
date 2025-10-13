@@ -11,10 +11,10 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder
 import org.bukkit.entity.Player
 import java.time.Duration
 
+import org.bukkit.plugin.java.JavaPlugin
 import kotlinx.coroutines.Dispatchers
 import com.typewritermc.core.utils.switchContext
 import org.bukkit.Bukkit
-import org.bukkit.plugin.java.JavaPlugin
 
 val spokenFormat: String by snippet(
     "dialogue.spoken.format",
@@ -66,30 +66,42 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
         val voiceActor = entry.voice.get(player)      // Voice actor
         val voiceText  = entry.voicetext.get(player)  // Override voice text (optional)
         val stopVoice  = entry.stopvoice.get(player)  // Stop previous talking first?
-
+        val cutVoice = entry.cutvoice.get(player)
         // Choose line: voicetext if non-blank, else the regular parsed 'text'
         val chosenVoiceLine = (voiceText?.takeIf { it.isNotBlank() } ?: text)
             .parsePlaceholders(player)
             .stripped()
 
-        // Dispatch once at start on the sync dispatcher
-        val plugin = JavaPlugin.getProvidingPlugin(this::class.java)
         if (stopVoice == true) {
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}")
+           runSync {  Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") }
         }
         if (!voiceActor.isNullOrBlank() && chosenVoiceLine.isNotBlank()) {
-            Bukkit.dispatchCommand(
-                Bukkit.getConsoleSender(),
-                "talkchar $voiceActor ${player.name} $chosenVoiceLine"
-            )
+           runSync {
+               Bukkit.dispatchCommand(
+                   Bukkit.getConsoleSender(),
+                   "talkchar $voiceActor ${player.name} $chosenVoiceLine"
+               )
+           }
         }
 
 
         confirmationKeyHandler = confirmationKey.handler(player) {
+            if (stopVoice == true) {
+                runSync { Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") }
+            }
             completeOrFinish()
         }
     }
+    private fun pluginHost(): JavaPlugin {
+        (Bukkit.getPluginManager().getPlugin("PacketEvents") as? JavaPlugin)?.let { return it }
+        (Bukkit.getPluginManager().getPlugin("packetevents") as? JavaPlugin)?.let { return it }
+        Bukkit.getPluginManager().plugins.firstOrNull { it is JavaPlugin }?.let { return it as JavaPlugin }
+        throw IllegalStateException("No JavaPlugin found to schedule tasks")
+    }
 
+    private fun runSync(task: () -> Unit) {
+        Bukkit.getScheduler().runTask(pluginHost(), Runnable { task() })
+    }
 
     override fun tick(context: TickContext) {
         if (state != MessengerState.RUNNING) return

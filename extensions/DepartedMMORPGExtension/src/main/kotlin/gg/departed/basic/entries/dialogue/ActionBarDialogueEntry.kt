@@ -45,6 +45,8 @@ class ActionBarDialogueEntry(
     val voicetext: Var<String> = ConstVar(""),
     @Help("Stop previous voices from playing.")
     val stopvoice: Var<Boolean> = ConstVar(true),
+    @Help("Cut lines if player skips dialogue.")
+    val cutvoice: Var<Boolean> = ConstVar(true),
     @Help("The duration it takes to type out the message.")
     val duration: Var<Duration> = ConstVar(Duration.ZERO),
 ) : DialogueEntry {

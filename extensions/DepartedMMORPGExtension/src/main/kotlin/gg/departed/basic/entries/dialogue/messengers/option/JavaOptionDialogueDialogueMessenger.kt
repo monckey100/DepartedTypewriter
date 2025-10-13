@@ -95,6 +95,7 @@ class JavaOptionDialogueDialogueMessenger(
     private val voiceActor = entry.voice.get(player) // Voice actor
     private val voiceText = entry.voicetext.get(player) // override voice text
     private val stopVoice = entry.stopvoice.get(player) // stop previous talking
+    private val cutVoice = entry.cutvoice.get(player)
 
     private var selectedIndex = 0
         set(value) {
@@ -412,6 +413,10 @@ class JavaOptionDialogueDialogueMessenger(
     }
 
     private fun confirmAndClose() {
+        // If requested, stop any ongoing voice first
+        if (cutVoice == true) {
+            runSync { Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") }
+        }
         completeOrFinish()
         stopMountControl()
     }

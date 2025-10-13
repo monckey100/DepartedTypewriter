@@ -14,6 +14,7 @@ import org.bukkit.entity.Player
 import java.time.Duration
 import kotlinx.coroutines.Dispatchers
 import org.bukkit.Bukkit
+import org.bukkit.plugin.java.JavaPlugin
 
 private val actionBarFormat: String by snippet(
     "dialogue.actionbar.format",
@@ -63,13 +64,15 @@ class JavaActionBarDialogueDialogueMessenger(
 
 
         if (stopVoice == true) {
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}")
+           runSync { Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") }
         }
         if (!voiceActor.isNullOrBlank() && chosenVoiceLine.isNotBlank()) {
-            Bukkit.dispatchCommand(
-                Bukkit.getConsoleSender(),
-                "talkchar $voiceActor ${player.name} $chosenVoiceLine"
-            )
+            runSync {
+                Bukkit.dispatchCommand(
+                    Bukkit.getConsoleSender(),
+                    "talkchar $voiceActor ${player.name} $chosenVoiceLine"
+                )
+            }
         }
 
 
@@ -77,6 +80,16 @@ class JavaActionBarDialogueDialogueMessenger(
         player.chatHistory.resendMessages(player)
     }
 
+    private fun pluginHost(): JavaPlugin {
+        (Bukkit.getPluginManager().getPlugin("PacketEvents") as? JavaPlugin)?.let { return it }
+        (Bukkit.getPluginManager().getPlugin("packetevents") as? JavaPlugin)?.let { return it }
+        Bukkit.getPluginManager().plugins.firstOrNull { it is JavaPlugin }?.let { return it as JavaPlugin }
+        throw IllegalStateException("No JavaPlugin found to schedule tasks")
+    }
+
+    private fun runSync(task: () -> Unit) {
+        Bukkit.getScheduler().runTask(pluginHost(), Runnable { task() })
+    }
     override fun tick(context: TickContext) {
         if (state != MessengerState.RUNNING) return
         playTime += context.deltaTime
