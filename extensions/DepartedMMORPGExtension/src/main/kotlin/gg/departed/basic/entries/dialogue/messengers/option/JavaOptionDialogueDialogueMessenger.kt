@@ -91,7 +91,7 @@ class JavaOptionDialogueDialogueMessenger(
     // --- Core state ---
     private var confirmationKeyHandler: ConfirmationKeyHandler? = null
     private val typeDuration = entry.duration.get(player)
-
+    private var preMountLoc: Location? = null
     private val voiceActor = entry.voice.get(player) // Voice actor
     private val voiceText = entry.voicetext.get(player) // override voice text
     private val stopVoice = entry.stopvoice.get(player) // stop previous talking
@@ -283,6 +283,8 @@ class JavaOptionDialogueDialogueMessenger(
     // --------------------- Mount control ---------------------
     private fun startMountControl() {
         runSync {
+            // save old loc
+            preMountLoc = player.location.clone()
             // Spawn invisible marker ArmorStand and mount the player (server-side)
             if (mount?.isValid == true) {
                 if (player.vehicle != mount) mount!!.addPassenger(player)
@@ -313,16 +315,32 @@ class JavaOptionDialogueDialogueMessenger(
     private fun stopMountControl() {
         unregisterPacketEventsListener()
         runSync {
-            // dismount & remove anchor
-            mount?.let { m ->
-                try {
-                    if (player.vehicle == m) player.leaveVehicle()
-                } catch (_: Throwable) {}
-                try {
-                    if (!m.isDead) m.remove()
-                } catch (_: Throwable) {}
-            }
+            val m = mount
             mount = null
+
+            // dismount & remove anchor
+            m?.let { stand ->
+                try { if (player.vehicle == stand) player.leaveVehicle() } catch (_: Throwable) {}
+                try { if (!stand.isDead) stand.remove() } catch (_: Throwable) {}
+            }
+
+            // return player to their original spot to avoid Y drift from remounts
+            val restore = preMountLoc
+            preMountLoc = null
+            if (restore != null) {
+                // Keep current look direction but restore the exact block position
+                val dest = restore.clone().apply {
+                    yaw = player.location.yaw
+                    pitch = player.location.pitch
+                }
+                // Do it next tick so we're guaranteed fully dismounted
+                Bukkit.getScheduler().runTaskLater(pluginHost(), Runnable {
+                    if (player.isOnline) {
+                        player.teleport(dest) // TeleportCause.PLUGIN optional
+                        player.fallDistance = 0f // just in case
+                    }
+                }, 1L)
+            }
         }
     }
 
