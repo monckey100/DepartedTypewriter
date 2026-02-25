@@ -21,7 +21,7 @@ class GlobalClassloader(
     parent: ClassLoader
 ) : ClassLoader(parent) {
     override fun loadClass(name: String, resolve: Boolean): Class<*> {
-        return group.getClassByName(name, resolve, requester) ?: super.loadClass(name, resolve)
+        return group.getClassByName(name, resolve, requester) ?: requester.loadClass(name, resolve, true, true)
     }
 }
 

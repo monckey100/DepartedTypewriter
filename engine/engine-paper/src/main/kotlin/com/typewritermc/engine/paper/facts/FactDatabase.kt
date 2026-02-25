@@ -151,6 +151,10 @@ class FactDatabase : KoinComponent {
 
     fun modify(player: Player, modifier: FactsModifier.() -> Unit) {
         val modifications = FactsModifier().apply(modifier).build()
+        modify(player, modifications)
+    }
+
+    fun modify(player: Player, modifications: Map<String, Int>) {
         if (modifications.isEmpty()) return
 
         for ((id, value) in modifications) {
