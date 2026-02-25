@@ -45,6 +45,10 @@ private val mm: MiniMessage by lazy {
         )
     }
 
+    if (serverVersion.isNewerThanOrEquals(ServerVersion.V_1_21_9)) {
+        resolvers.addAll(listOf(StandardTags.sequentialHead(), StandardTags.sprite()))
+    }
+
     MiniMessage.builder()
         .tags(
             TagResolver.builder()
@@ -256,7 +260,7 @@ private fun Component.splitLines(): Sequence<Component> = sequence {
         val mergedStyle = split.style().merge(this@splitLines.style(), Style.Merge.Strategy.IF_ABSENT_ON_TARGET)
         val splitWithStyling = split.style(mergedStyle)
         children.add(splitWithStyling)
-        assert(splits.isEmpty())
+        require(splits.isEmpty())
     }
 
     if (remaining == null && children.isEmpty()) return@sequence
