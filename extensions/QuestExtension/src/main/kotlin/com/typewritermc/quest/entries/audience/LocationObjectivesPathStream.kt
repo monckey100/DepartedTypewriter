@@ -23,6 +23,7 @@ import com.typewritermc.roadnetwork.entries.highestPathStreamDisplayEntry
     Colors.GREEN,
     "material-symbols:conversion-path"
 )
+@Deprecated("Move to the new LocatableObjectivesPathStream")
 /**
  * The `Location Objectives Path Stream` entry is a path stream that shows the path to each tracked location objective.
  * When the player has a location objective, and the quest for the objective is tracked, a path stream will be displayed.

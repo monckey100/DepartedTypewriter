@@ -5,7 +5,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly("io.lumine:Mythic-Dist:5.8.2")
+    compileOnly("io.lumine:Mythic-Dist:5.12.0")
 }
 
 typewriter {
