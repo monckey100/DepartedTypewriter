@@ -37,7 +37,9 @@ class ConsoleCommandActionEntry(
     @Placeholder
     @MultiLine
     @Help("Every line is a different command. Commands should not be prefixed with <code>/</code>.")
-    private val command: Var<String> = ConstVar(""),
+    // Readable so DepartedNpcsExtension's quest-offer gate can inspect commands for quest
+    // activations before the conversation that would dispatch them starts.
+    val command: Var<String> = ConstVar(""),
 ) : ActionEntry {
     override fun ActionTrigger.execute() {
         val command = command.get(player, context)
