@@ -1,8 +1,11 @@
 package gg.departed.basic.entries.dialogue.messengers.option
 
+import gg.departed.basic.entries.dialogue.DialogueMountControl
+import gg.departed.basic.entries.dialogue.NpcNodController
 import gg.departed.basic.entries.dialogue.Option
 import gg.departed.basic.entries.dialogue.OptionContextKeys
 import gg.departed.basic.entries.dialogue.OptionDialogueEntry
+import gg.departed.basic.entries.dialogue.TalkIndicator
 import com.typewritermc.engine.paper.entry.matches
 import com.typewritermc.core.interaction.InteractionContext
 import com.typewritermc.core.utils.around
@@ -19,7 +22,6 @@ import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder
 import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.entity.ArmorStand
-import org.bukkit.entity.EntityType
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.player.PlayerMoveEvent
@@ -49,7 +51,7 @@ val optionFormat: String by snippet(
         |<white> <speaker><reset>: <text>
         |
         |<options>
-        |<#5d6c78>[ <grey><white>Use</white> WASD <grey>to choose,</grey> <white>Jump/Shift</white> to select <#5d6c78>]</#5d6c78>
+        |<#5d6c78>[ <grey><white>Use</white> WASD/Scroll <grey>to choose,</grey> <white>Jump/Shift</white> to select <#5d6c78>]</#5d6c78>
         |<gray><st>${" ".repeat(60)}</st>
     """.trimMargin()
 )
@@ -90,6 +92,7 @@ class JavaOptionDialogueDialogueMessenger(
 
     // --- Core state ---
     private var confirmationKeyHandler: ConfirmationKeyHandler? = null
+    private val talkIndicator = TalkIndicator(player, context, entry.talkIndicator)
     private val typeDuration = entry.duration.get(player)
     private var preMountLoc: Location? = null
     private val voiceActor = entry.voice.get(player) // Voice actor
@@ -125,6 +128,7 @@ class JavaOptionDialogueDialogueMessenger(
 
     // --- Server-side mount + PacketEvents input ---
     private var mount: ArmorStand? = null
+    private var nodNpcId: String? = null
     private var packetListener: PacketListenerAbstract? = null
     private val hasPacketEvents by lazy {
         Bukkit.getPluginManager().getPlugin("packetevents") != null ||
@@ -136,6 +140,7 @@ class JavaOptionDialogueDialogueMessenger(
 
     override fun init() {
         usableOptions = entry.options.filter { it.criteria.matches(player, context) }
+        talkIndicator.init()
 
         speakerDisplayName = entry.speakerDisplayName.get(player).parsePlaceholders(player)
         parsedText = entry.text.get(player).parsePlaceholders(player)
@@ -168,10 +173,17 @@ class JavaOptionDialogueDialogueMessenger(
 
         // Start mount-based control
         startMountControl()
+
+        // Nod the speaking NPC's head while the line types out.
+        runSync {
+            nodNpcId = NpcNodController.resolveSpeakerId(entry.npcSpeaker, entry.speaker.get(), player)
+            NpcNodController.start(nodNpcId, player, (totalDuration.toMillis() / 50L).toInt().coerceAtLeast(1))
+        }
     }
 
     override fun tick(context: TickContext) {
         super.tick(context)
+        talkIndicator.tick()
         val isFirst = playTime == Duration.ZERO
         playTime += context.deltaTime
         if (state != MessengerState.RUNNING) return
@@ -281,30 +293,14 @@ class JavaOptionDialogueDialogueMessenger(
     }
 
     // --------------------- Mount control ---------------------
+    // The control mount is SHARED across every dialogue node (option AND spoken) of a conversation
+    // via DialogueMountControl, so the player stays continuously seated and never bobs. This node
+    // claims it (creating it if first) and adds the WASD packet listener on top.
     private fun startMountControl() {
         runSync {
-            // save old loc
-            preMountLoc = player.location.clone()
-            // Spawn invisible marker ArmorStand and mount the player (server-side)
-            if (mount?.isValid == true) {
-                if (player.vehicle != mount) mount!!.addPassenger(player)
-            } else {
-                val baseLoc: Location = player.location.clone()
-                baseLoc.add(0.0, 0.6, 0.0) // 0.375
-                val asStand = player.world.spawnEntity(baseLoc, EntityType.ARMOR_STAND) as ArmorStand
-                asStand.isSilent = true
-                asStand.isInvisible = true
-                asStand.isInvulnerable = true
-                asStand.setGravity(false)
-                asStand.isMarker = true
-                asStand.isCollidable = false
-                asStand.customName = null
-                asStand.setBasePlate(false)
-                asStand.setArms(false)
-                asStand.setSmall(true)
-                asStand.addPassenger(player)
-                mount = asStand
-            }
+            val claim = DialogueMountControl.claim(player)
+            mount = claim.stand
+            preMountLoc = claim.anchor
 
             if (hasPacketEvents) registerPacketEventsListener() else {
                 player.sendMessage(Component.text("WASD menu requires PacketEvents; Jump/Shift will still confirm."))
@@ -314,34 +310,9 @@ class JavaOptionDialogueDialogueMessenger(
 
     private fun stopMountControl() {
         unregisterPacketEventsListener()
-        runSync {
-            val m = mount
-            mount = null
-
-            // dismount & remove anchor
-            m?.let { stand ->
-                try { if (player.vehicle == stand) player.leaveVehicle() } catch (_: Throwable) {}
-                try { if (!stand.isDead) stand.remove() } catch (_: Throwable) {}
-            }
-
-            // return player to their original spot to avoid Y drift from remounts
-            val restore = preMountLoc
-            preMountLoc = null
-            if (restore != null) {
-                // Keep current look direction but restore the exact block position
-                val dest = restore.clone().apply {
-                    yaw = player.location.yaw
-                    pitch = player.location.pitch
-                }
-                // Do it next tick so we're guaranteed fully dismounted
-                Bukkit.getScheduler().runTaskLater(pluginHost(), Runnable {
-                    if (player.isOnline) {
-                        player.teleport(dest) // TeleportCause.PLUGIN optional
-                        player.fallDistance = 0f // just in case
-                    }
-                }, 1L)
-            }
-        }
+        mount = null
+        preMountLoc = null
+        runSync { DialogueMountControl.release(player) }
     }
 
     private fun registerPacketEventsListener() {
@@ -431,12 +402,17 @@ class JavaOptionDialogueDialogueMessenger(
     }
 
     private fun confirmAndClose() {
+        if (state != MessengerState.RUNNING) return
         // If requested, stop any ongoing voice first
         if (cutVoice == true) {
             runSync { Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") }
         }
+        // NOTE: do NOT release the mount here. When the text is still typing, completeOrFinish() only
+        // finishes the ANIMATION (the node stays RUNNING) — releasing the mount then would tear the
+        // stand down mid-dialogue (the deferred teardown fires because nothing reclaims it), and the
+        // player, still in an active dialogue with no stand, would walk free. The mount is tied to the
+        // messenger lifecycle instead: claimed in init(), released in dispose() when the node truly ends.
         completeOrFinish()
-        stopMountControl()
     }
 
     // --------------------- Safety nets / fallback movement lock ---------------------
@@ -462,27 +438,60 @@ class JavaOptionDialogueDialogueMessenger(
         confirmAndClose()
     }
 
+    // Scroll-wheel navigation: while the dialogue is up, hotbar scrolling moves the selection
+    // instead of changing slots. Works even for players whose vehicle input packets never arrive,
+    // so it doubles as the fallback for the WASD-less cases. Wrap-aware: 8 -> 0 is one step down,
+    // 0 -> 8 one step up.
+    @EventHandler
+    private fun onItemHeld(e: org.bukkit.event.player.PlayerItemHeldEvent) {
+        if (e.player.uniqueId != player.uniqueId) return
+        if (state != MessengerState.RUNNING) return
+        if (mount == null) return
+        e.isCancelled = true
+        if (usableOptions.size <= 1) return
+        var delta = e.newSlot - e.previousSlot
+        if (delta > 4) delta -= 9
+        if (delta < -4) delta += 9
+        if (delta == 0) return
+        moveSelection(if (delta > 0) 1 else -1)
+        displayMessage(playTime)
+    }
+
     @EventHandler
     private fun onPlayerMove(event: PlayerMoveEvent) {
         if (event.player.uniqueId != player.uniqueId) return
         if (state != MessengerState.RUNNING) return
         val m = mount
-        // If for some reason we aren't mounted (plugin conflict), hard-lock position but keep look
+        // If we've lost the mount (dismounted/drifted), snap the player back to their mount point
+        // instead of letting them wander; keep look direction.
         if (m == null || event.player.vehicle != m) {
-            val from = event.from
+            val anchor = preMountLoc ?: return
             val to = event.to ?: return
-            if (!event.hasChangedPosition()) return
-            event.to = from.clone().apply {
+            if (to.x == anchor.x && to.y == anchor.y && to.z == anchor.z) return
+            event.to = anchor.clone().apply {
                 yaw = to.yaw
                 pitch = to.pitch
             }
         }
     }
 
+    // Veto the vanilla shift-to-dismount while the dialogue mount is held. SHIFT is both our
+    // "confirm" key and Minecraft's dismount key, so spamming it (or pressing it before the
+    // options finish animating in) used to throw the player off the mount. Cancelling keeps them
+    // seated; onSneak still fires the confirm.
+    @EventHandler
+    private fun onDismount(e: org.bukkit.event.entity.EntityDismountEvent) {
+        if (e.entity.uniqueId != player.uniqueId) return
+        val held = DialogueMountControl.heldStand(player) ?: return
+        if (e.dismounted == held) e.isCancelled = true
+    }
+
     override fun dispose() {
         super.dispose()
+        talkIndicator.dispose()
         confirmationKeyHandler?.dispose()
         confirmationKeyHandler = null
+        NpcNodController.stop(nodNpcId, player)
         stopMountControl()
     }
 }

@@ -49,6 +49,7 @@ class ActionBarDialogueEntry(
     val cutvoice: Var<Boolean> = ConstVar(true),
     @Help("The duration it takes to type out the message.")
     val duration: Var<Duration> = ConstVar(Duration.ZERO),
+    val talkIndicator: TalkIndicatorSettings = TalkIndicatorSettings(),
 ) : DialogueEntry {
     override fun messenger(player: Player, context: InteractionContext): DialogueMessenger<ActionBarDialogueEntry> {
         return if (player.isFloodgate) BedrockActionBarDialogueDialogueMessenger(player, context, this)

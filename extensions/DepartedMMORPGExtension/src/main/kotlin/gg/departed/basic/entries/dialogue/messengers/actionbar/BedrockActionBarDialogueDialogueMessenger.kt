@@ -1,10 +1,12 @@
 package gg.departed.basic.entries.dialogue.messengers.actionbar
 
 import gg.departed.basic.entries.dialogue.ActionBarDialogueEntry
+import gg.departed.basic.entries.dialogue.TalkIndicator
 import com.typewritermc.core.interaction.InteractionBoundState
 import com.typewritermc.core.interaction.InteractionContext
 import com.typewritermc.engine.paper.entry.dialogue.DialogueMessenger
 import com.typewritermc.engine.paper.entry.dialogue.MessengerState
+import com.typewritermc.engine.paper.entry.dialogue.TickContext
 import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
 import com.typewritermc.engine.paper.interaction.boundState
 import com.typewritermc.engine.paper.snippets.snippet
@@ -21,10 +23,16 @@ class BedrockActionBarDialogueDialogueMessenger(
     context: InteractionContext,
     entry: ActionBarDialogueEntry
 ) : DialogueMessenger<ActionBarDialogueEntry>(player, context, entry) {
+    private val talkIndicator = TalkIndicator(player, context, entry.talkIndicator)
 
     override fun init() {
         super.init()
+        talkIndicator.init()
         sendForm()
+    }
+
+    override fun tick(context: TickContext) {
+        talkIndicator.tick()
     }
 
     fun sendForm() {
@@ -59,5 +67,10 @@ class BedrockActionBarDialogueDialogueMessenger(
 
     override fun end() {
         // Do nothing as we don't need to resend the messages.
+    }
+
+    override fun dispose() {
+        super.dispose()
+        talkIndicator.dispose()
     }
 }

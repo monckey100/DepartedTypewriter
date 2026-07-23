@@ -33,6 +33,12 @@ class SpokenDialogueEntry(
     override val modifiers: List<Modifier> = emptyList(),
     override val triggers: List<Ref<TriggerableEntry>> = emptyList(),
     override val speaker: Ref<SpeakerEntry> = emptyRef(),
+    @Colored
+    @Placeholder
+    @Help("The name shown for the speaker. Supports MiniMessage colors. Used when no speaker reference is set.")
+    val speakerName: Var<String> = ConstVar(""),
+    @Help("The DepartedNPC id that speaks this line; its head nods while talking.")
+    val npcSpeaker: String = "",
     @Placeholder
     @Colored
     @MultiLine
@@ -47,7 +53,12 @@ class SpokenDialogueEntry(
     val cutvoice: Var<Boolean> = ConstVar(true),
     @Help("The duration it takes to type out the message.")
     val duration: Var<Duration> = ConstVar(Duration.ZERO),
+    val talkIndicator: TalkIndicatorSettings = TalkIndicatorSettings(),
 ) : DialogueEntry {
+    // Prefer a linked speaker reference (backwards compat); otherwise use the inline name.
+    override val speakerDisplayName: Var<String>
+        get() = speaker.get()?.displayName ?: speakerName
+
     override fun messenger(player: Player, context: InteractionContext): DialogueMessenger<SpokenDialogueEntry> {
         return if (player.isFloodgate) BedrockSpokenDialogueDialogueMessenger(player, context, this)
         else JavaSpokenDialogueDialogueMessenger(player, context, this)

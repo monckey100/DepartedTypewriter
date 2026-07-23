@@ -2,12 +2,14 @@ package gg.departed.basic.entries.dialogue.messengers.option
 
 import gg.departed.basic.entries.dialogue.Option
 import gg.departed.basic.entries.dialogue.OptionDialogueEntry
+import gg.departed.basic.entries.dialogue.TalkIndicator
 import com.typewritermc.engine.paper.entry.matches
 import com.typewritermc.core.interaction.InteractionBoundState
 import com.typewritermc.core.interaction.InteractionContext
 import com.typewritermc.engine.paper.entry.Modifier
 import com.typewritermc.engine.paper.entry.dialogue.DialogueMessenger
 import com.typewritermc.engine.paper.entry.dialogue.MessengerState
+import com.typewritermc.engine.paper.entry.dialogue.TickContext
 import com.typewritermc.engine.paper.entry.entries.EventTrigger
 import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
 import com.typewritermc.engine.paper.interaction.boundState
@@ -25,6 +27,7 @@ class BedrockOptionDialogueDialogueMessenger(player: Player, context: Interactio
 
     private var selectedIndex = 0
     private val selected get() = usableOptions[selectedIndex]
+    private val talkIndicator = TalkIndicator(player, context, entry.talkIndicator)
 
     private var usableOptions: List<Option> = emptyList()
 
@@ -37,7 +40,12 @@ class BedrockOptionDialogueDialogueMessenger(player: Player, context: Interactio
 
     override fun init() {
         super.init()
+        talkIndicator.init()
         sendForm()
+    }
+
+    override fun tick(context: TickContext) {
+        talkIndicator.tick()
     }
 
     fun sendForm() {
@@ -75,5 +83,10 @@ class BedrockOptionDialogueDialogueMessenger(player: Player, context: Interactio
 
     override fun end() {
         // Do nothing as we don't need to resend the messages.
+    }
+
+    override fun dispose() {
+        super.dispose()
+        talkIndicator.dispose()
     }
 }

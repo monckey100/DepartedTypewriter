@@ -118,9 +118,11 @@ class DisplayDialogueCinematicAction(
                     Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}")
                 }
                 if (!voiceActor.isNullOrBlank() && chosenVoiceLine.isNotBlank()) {
+                    // Cinematic: the player is typically being moved along a path, so the voice must
+                    // follow them (-follow) rather than anchoring to a spot they've left behind.
                     Bukkit.dispatchCommand(
                         Bukkit.getConsoleSender(),
-                        "talkchar $voiceActor ${player.name} $chosenVoiceLine"
+                        "talkchar -follow $voiceActor ${player.name} $chosenVoiceLine"
                     )
                 }
             }

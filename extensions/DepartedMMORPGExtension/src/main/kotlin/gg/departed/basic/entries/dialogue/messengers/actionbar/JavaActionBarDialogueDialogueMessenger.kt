@@ -1,6 +1,7 @@
 package gg.departed.basic.entries.dialogue.messengers.actionbar
 
 import gg.departed.basic.entries.dialogue.ActionBarDialogueEntry
+import gg.departed.basic.entries.dialogue.TalkIndicator
 import com.typewritermc.core.interaction.InteractionContext
 import com.typewritermc.engine.paper.entry.dialogue.*
 import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
@@ -29,6 +30,7 @@ class JavaActionBarDialogueDialogueMessenger(
     DialogueMessenger<ActionBarDialogueEntry>(player, context, entry) {
 
     private var confirmationKeyHandler: ConfirmationKeyHandler? = null
+    private val talkIndicator = TalkIndicator(player, context, entry.talkIndicator)
 
     private var speakerDisplayName = ""
     private var text = ""
@@ -44,6 +46,7 @@ class JavaActionBarDialogueDialogueMessenger(
 
     override fun init() {
         super.init()
+        talkIndicator.init()
         speakerDisplayName = entry.speakerDisplayName.get(player).parsePlaceholders(player)
         text = entry.text.get(player).parsePlaceholders(player)
         typingDuration = typingDurationType.totalDuration(text.stripped(), entry.duration.get(player))
@@ -68,9 +71,11 @@ class JavaActionBarDialogueDialogueMessenger(
         }
         if (!voiceActor.isNullOrBlank() && chosenVoiceLine.isNotBlank()) {
             runSync {
+                // Action-bar dialogue doesn't lock the player in place, so the voice follows them
+                // (-follow) instead of anchoring to a spot they may walk away from.
                 Bukkit.dispatchCommand(
                     Bukkit.getConsoleSender(),
-                    "talkchar $voiceActor ${player.name} $chosenVoiceLine"
+                    "talkchar -follow $voiceActor ${player.name} $chosenVoiceLine"
                 )
             }
         }
@@ -91,6 +96,7 @@ class JavaActionBarDialogueDialogueMessenger(
         Bukkit.getScheduler().runTask(pluginHost(), Runnable { task() })
     }
     override fun tick(context: TickContext) {
+        talkIndicator.tick()
         if (state != MessengerState.RUNNING) return
         playTime += context.deltaTime
 
@@ -127,6 +133,7 @@ class JavaActionBarDialogueDialogueMessenger(
 
     override fun dispose() {
         super.dispose()
+        talkIndicator.dispose()
         val component = Component.empty()
         player.acceptActionBarMessage(component)
         player.sendActionBar(component)

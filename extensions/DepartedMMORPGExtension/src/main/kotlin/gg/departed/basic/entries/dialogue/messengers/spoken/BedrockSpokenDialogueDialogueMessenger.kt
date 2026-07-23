@@ -1,6 +1,8 @@
 package gg.departed.basic.entries.dialogue.messengers.spoken
 
+import gg.departed.basic.entries.dialogue.LastSpeakerTracker
 import gg.departed.basic.entries.dialogue.SpokenDialogueEntry
+import gg.departed.basic.entries.dialogue.TalkIndicator
 import com.typewritermc.core.interaction.InteractionBoundState
 import com.typewritermc.core.interaction.InteractionContext
 import com.typewritermc.engine.paper.entry.dialogue.DialogueMessenger
@@ -18,10 +20,23 @@ private val spokenButton: String by snippet("dialogue.spoken.bedrock.button", "C
 
 class BedrockSpokenDialogueDialogueMessenger(player: Player, context: InteractionContext, entry: SpokenDialogueEntry) :
     DialogueMessenger<SpokenDialogueEntry>(player, context, entry) {
+    private val talkIndicator = TalkIndicator(player, context, entry.talkIndicator)
 
     override fun init() {
         super.init()
+        talkIndicator.init()
+        // Remember who is talking so out-of-band NPC speech (quest-busy line) can use them.
+        LastSpeakerTracker.record(
+            player.uniqueId,
+            entry.speakerDisplayName.get(player).parsePlaceholders(player),
+            entry.voice.get(player),
+            null
+        )
         sendForm()
+    }
+
+    override fun tick(context: com.typewritermc.engine.paper.entry.dialogue.TickContext) {
+        talkIndicator.tick()
     }
 
     fun sendForm() {
@@ -53,5 +68,10 @@ class BedrockSpokenDialogueDialogueMessenger(player: Player, context: Interactio
 
     override fun end() {
         // Do nothing as we don't need to resend the messages.
+    }
+
+    override fun dispose() {
+        super.dispose()
+        talkIndicator.dispose()
     }
 }

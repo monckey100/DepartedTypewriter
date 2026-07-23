@@ -1,7 +1,12 @@
 package gg.departed.basic.entries.dialogue.messengers.spoken
 
+import gg.departed.basic.entries.dialogue.DialogueMountControl
+import gg.departed.basic.entries.dialogue.LastSpeakerTracker
+import gg.departed.basic.entries.dialogue.NpcNodController
 import gg.departed.basic.entries.dialogue.SpokenDialogueEntry
+import gg.departed.basic.entries.dialogue.TalkIndicator
 import com.typewritermc.core.interaction.InteractionContext
+import org.bukkit.event.EventHandler
 import com.typewritermc.engine.paper.entry.dialogue.*
 import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
 import com.typewritermc.engine.paper.interaction.chatHistory
@@ -15,6 +20,16 @@ import org.bukkit.plugin.java.JavaPlugin
 import kotlinx.coroutines.Dispatchers
 import com.typewritermc.core.utils.switchContext
 import org.bukkit.Bukkit
+
+// PacketEvents 2.x — confirm-only input while the player is seated on the dialogue mount (a seated
+// player can't fire PlayerJumpEvent, so the JUMP confirmation key must be read from the steer packet).
+import com.github.retrooper.packetevents.PacketEvents
+import com.github.retrooper.packetevents.event.PacketListenerAbstract
+import com.github.retrooper.packetevents.event.PacketListenerPriority
+import com.github.retrooper.packetevents.event.PacketReceiveEvent
+import com.github.retrooper.packetevents.protocol.packettype.PacketType
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerInput
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientSteerVehicle
 
 val spokenFormat: String by snippet(
     "dialogue.spoken.format",
@@ -43,11 +58,21 @@ val spokenInstructionTicksBase: Long by snippet("dialogue.spoken.instruction.tic
 class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionContext, entry: SpokenDialogueEntry) :
     DialogueMessenger<SpokenDialogueEntry>(player, context, entry) {
     private var confirmationKeyHandler: ConfirmationKeyHandler? = null
+    private val talkIndicator = TalkIndicator(player, context, entry.talkIndicator)
 
     private var speakerDisplayName = ""
     private var text = ""
     private var typingDuration = Duration.ZERO
     private var playedTime = Duration.ZERO
+
+    // Whether to stop the current voice line when this dialogue is advanced/finished.
+    private var stopVoiceOnAdvance = false
+    private var nodNpcId: String? = null
+    private var packetListener: PacketListenerAbstract? = null
+    private val hasPacketEvents by lazy {
+        Bukkit.getPluginManager().getPlugin("packetevents") != null ||
+                Bukkit.getPluginManager().getPlugin("PacketEvents") != null
+    }
 
     override var animationComplete: Boolean
         get() = playedTime >= typingDuration
@@ -58,6 +83,7 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
 
     override fun init() {
         super.init()
+        talkIndicator.init()
         speakerDisplayName = entry.speakerDisplayName.get(player).parsePlaceholders(player)
         text = entry.text.get(player).parsePlaceholders(player)
         typingDuration = typingDurationType.totalDuration(text.stripped(), entry.duration.get(player))
@@ -72,6 +98,7 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
             .parsePlaceholders(player)
             .stripped()
 
+        stopVoiceOnAdvance = (stopVoice == true)
         if (stopVoice == true) {
            runSync {  Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") }
         }
@@ -85,12 +112,79 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
         }
 
 
-        confirmationKeyHandler = confirmationKey.handler(player) {
-            if (stopVoice == true) {
-                runSync { Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") }
-            }
-            completeOrFinish()
+        confirmationKeyHandler = confirmationKey.handler(player) { advance() }
+
+        // Hold the shared dialogue mount so spoken (option-less) lines anchor the player too, and
+        // so a conversation moving spoken <-> option keeps the SAME mount (no dismount/remount bob).
+        // Because the seated player can't fire PlayerJumpEvent, also read confirm from the steer packet.
+        runSync {
+            DialogueMountControl.claim(player)
+            registerConfirmListener()
+            // Nod the speaking NPC's head for roughly as long as the line takes to type out.
+            nodNpcId = NpcNodController.resolveSpeakerId(entry.npcSpeaker, entry.speaker.get(), player)
+            NpcNodController.start(nodNpcId, player, (typingDuration.toMillis() / 50L).toInt().coerceAtLeast(1))
+            // Remember who is talking so out-of-band NPC speech (quest-busy line) can use them.
+            LastSpeakerTracker.record(player.uniqueId, speakerDisplayName, voiceActor ?: "", nodNpcId)
         }
+    }
+
+    /** Advance/finish this spoken line (shared by the confirmation key and the seated-mount packet). */
+    private fun advance() {
+        if (state != MessengerState.RUNNING) return
+        if (stopVoiceOnAdvance) {
+            runSync { Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") }
+        }
+        completeOrFinish()
+    }
+
+    private fun registerConfirmListener() {
+        if (packetListener != null || !hasPacketEvents) return
+        packetListener = object : PacketListenerAbstract(PacketListenerPriority.HIGHEST) {
+            override fun onPacketReceive(event: PacketReceiveEvent) {
+                val type = event.packetType
+                if (type != PacketType.Play.Client.STEER_VEHICLE &&
+                    type != PacketType.Play.Client.PLAYER_INPUT
+                ) return
+                val user = event.user ?: return
+                if (user.uuid != player.uniqueId) return
+                if (state != MessengerState.RUNNING) return
+                val held = DialogueMountControl.heldStand(player) ?: return
+                if (player.vehicle != held) return
+
+                val confirm = when (type) {
+                    PacketType.Play.Client.STEER_VEHICLE -> {
+                        val w = WrapperPlayClientSteerVehicle(event)
+                        w.isJump || w.isUnmount // SPACE or SHIFT
+                    }
+                    PacketType.Play.Client.PLAYER_INPUT -> {
+                        val w = WrapperPlayClientPlayerInput(event)
+                        w.isJump || w.isShift // SPACE or SHIFT
+                    }
+                    else -> false
+                }
+
+                // Always cancel steer/jump/unmount packets while seated so the player stays put.
+                event.isCancelled = true
+                if (confirm) runSync { advance() }
+            }
+        }
+        PacketEvents.getAPI().eventManager.registerListener(packetListener!!)
+    }
+
+    private fun unregisterConfirmListener() {
+        packetListener?.let {
+            try { PacketEvents.getAPI().eventManager.unregisterListener(it) } catch (_: Throwable) {}
+        }
+        packetListener = null
+    }
+
+    // Veto the vanilla shift-to-dismount while the dialogue mount is held, so the player can't
+    // throw themselves off mid-conversation. See the option messenger for the full rationale.
+    @EventHandler
+    private fun onDismount(e: org.bukkit.event.entity.EntityDismountEvent) {
+        if (e.entity.uniqueId != player.uniqueId) return
+        val held = DialogueMountControl.heldStand(player) ?: return
+        if (e.dismounted == held) e.isCancelled = true
     }
     private fun pluginHost(): JavaPlugin {
         (Bukkit.getPluginManager().getPlugin("PacketEvents") as? JavaPlugin)?.let { return it }
@@ -104,6 +198,7 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
     }
 
     override fun tick(context: TickContext) {
+        talkIndicator.tick()
         if (state != MessengerState.RUNNING) return
         playedTime += context.deltaTime
         player.sendSpokenDialogue(
@@ -117,8 +212,14 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
 
     override fun dispose() {
         super.dispose()
+        talkIndicator.dispose()
         confirmationKeyHandler?.dispose()
         confirmationKeyHandler = null
+        unregisterConfirmListener()
+        NpcNodController.stop(nodNpcId, player)
+        // Deferred release: if the next node (option or spoken) re-claims within a few ticks the
+        // mount is kept; only the final node of the conversation actually tears it down.
+        runSync { DialogueMountControl.release(player) }
     }
 }
 
