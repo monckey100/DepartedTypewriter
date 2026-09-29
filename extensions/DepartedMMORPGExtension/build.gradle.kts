@@ -12,6 +12,9 @@ repositories {
 }
 dependencies {
     implementation("com.mthaler:aparser:0.4.0")
+    compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedNPC-1.0.0.jar"))
+    compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedRPG.jar"))
+    compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedLanguage-1.0.0.jar"))
 }
 
 typewriter {
@@ -24,10 +27,12 @@ typewriter {
             Quality of life features for Typewriter not present in basic extension.
             |Currently only features WASD dialogue option but new features will be 
             |added as the need arises.""".trimMargin()
-        // engineVersion = file("../../version.txt").readText().trim()
-        engineVersion = "0.9.0-beta-165"
+        engineVersion = file("../../version.txt").readText().trim()
 
-        paper()
+        paper {
+            dependency("DepartedNPC")
+            dependency("DepartedRPG")
+        }
     }
 }
 kotlin {

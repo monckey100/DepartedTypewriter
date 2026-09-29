@@ -1,5 +1,6 @@
 package gg.departed.basic.entries.dialogue.messengers.actionbar
 
+import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.ActionBarDialogueEntry
 import gg.departed.basic.entries.dialogue.TalkIndicator
 import com.typewritermc.core.interaction.InteractionBoundState
@@ -43,13 +44,13 @@ class BedrockActionBarDialogueDialogueMessenger(
                     actionBarTitle.parsePlaceholders(player).legacy(
                         Placeholder.parsed(
                             "speaker",
-                            entry.speakerDisplayName.get(player).parsePlaceholders(player)
+                            DepartedLang.tr(player, entry.speakerDisplayName.get(player)).parsePlaceholders(player)
                         )
                     )
                 )
                 .content(
                     actionBarContent.parsePlaceholders(player).legacy(
-                        Placeholder.parsed("message", entry.text.get(player).parsePlaceholders(player))
+                        Placeholder.parsed("message", DepartedLang.tr(player, entry.text.get(player)).parsePlaceholders(player))
                     )
                 )
                 .button(actionBarButton.parsePlaceholders(player).legacy())

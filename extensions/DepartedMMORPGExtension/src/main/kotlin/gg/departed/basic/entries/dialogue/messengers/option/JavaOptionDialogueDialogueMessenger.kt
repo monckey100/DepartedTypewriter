@@ -1,5 +1,6 @@
 package gg.departed.basic.entries.dialogue.messengers.option
 
+import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.DialogueMountControl
 import gg.departed.basic.entries.dialogue.NpcNodController
 import gg.departed.basic.entries.dialogue.Option
@@ -142,8 +143,10 @@ class JavaOptionDialogueDialogueMessenger(
         usableOptions = entry.options.filter { it.criteria.matches(player, context) }
         talkIndicator.init()
 
-        speakerDisplayName = entry.speakerDisplayName.get(player).parsePlaceholders(player)
-        parsedText = entry.text.get(player).parsePlaceholders(player)
+        speakerDisplayName = DepartedLang.tr(player, entry.speakerDisplayName.get(player)).parsePlaceholders(player)
+        val sourceText = entry.text.get(player)
+        val localText = DepartedLang.tr(player, sourceText)
+        parsedText = localText.parsePlaceholders(player)
 
         val rawText = parsedText.stripped()
         val typingDuration = typingDurationType.totalDuration(rawText, typeDuration)
@@ -152,7 +155,7 @@ class JavaOptionDialogueDialogueMessenger(
 
         // --- NEW: voice control (executes only once when dialogue starts) ---
         // Choose the line to speak: voiceText (if not empty) else the regular parsedText
-        val chosenVoiceLine = (voiceText?.takeIf { it.isNotBlank() } ?: parsedText)
+        val chosenVoiceLine = DepartedLang.voice(player, voiceText, sourceText, localText)
             .parsePlaceholders(player)
             .stripped()
 
@@ -262,7 +265,7 @@ class JavaOptionDialogueDialogueMessenger(
             val format = if (isSelected) selectedOption else unselectedOption
             lines += format.asMiniWithResolvers(
                 Placeholder.parsed("prefix", prefix),
-                Placeholder.parsed("option_text", option.text.get(player).parsePlaceholders(player))
+                Placeholder.parsed("option_text", DepartedLang.tr(player, option.text.get(player)).parsePlaceholders(player))
             )
         }
 

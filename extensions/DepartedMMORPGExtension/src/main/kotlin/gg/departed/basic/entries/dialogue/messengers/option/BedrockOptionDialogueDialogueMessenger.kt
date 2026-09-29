@@ -1,5 +1,6 @@
 package gg.departed.basic.entries.dialogue.messengers.option
 
+import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.Option
 import gg.departed.basic.entries.dialogue.OptionDialogueEntry
 import gg.departed.basic.entries.dialogue.TalkIndicator
@@ -55,17 +56,17 @@ class BedrockOptionDialogueDialogueMessenger(player: Player, context: Interactio
             org.geysermc.cumulus.form.CustomForm.builder()
                 .title(
                     optionTitle.parsePlaceholders(player).legacy(
-                        Placeholder.parsed("speaker", entry.speakerDisplayName.get(player).parsePlaceholders(player))
+                        Placeholder.parsed("speaker", DepartedLang.tr(player, entry.speakerDisplayName.get(player)).parsePlaceholders(player))
                     )
                 )
                 .label(
                     optionDescription.parsePlaceholders(player).legacy(
-                        Placeholder.parsed("message", entry.text.get(player).parsePlaceholders(player))
+                        Placeholder.parsed("message", DepartedLang.tr(player, entry.text.get(player)).parsePlaceholders(player))
                     )
                 )
                 .dropdown(
                     optionSelect.parsePlaceholders(player).legacy(),
-                    usableOptions.map { it.text.get(player).parsePlaceholders(player).legacy() })
+                    usableOptions.map { DepartedLang.tr(player, it.text.get(player)).parsePlaceholders(player).legacy() })
                 .label("\n\n\n\n")
                 .closedOrInvalidResultHandler { _, _ ->
                     when (player.boundState) {

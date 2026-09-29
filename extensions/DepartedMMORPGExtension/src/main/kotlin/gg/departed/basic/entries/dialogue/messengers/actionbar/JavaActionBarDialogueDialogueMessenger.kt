@@ -1,5 +1,6 @@
 package gg.departed.basic.entries.dialogue.messengers.actionbar
 
+import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.ActionBarDialogueEntry
 import gg.departed.basic.entries.dialogue.TalkIndicator
 import com.typewritermc.core.interaction.InteractionContext
@@ -47,8 +48,10 @@ class JavaActionBarDialogueDialogueMessenger(
     override fun init() {
         super.init()
         talkIndicator.init()
-        speakerDisplayName = entry.speakerDisplayName.get(player).parsePlaceholders(player)
-        text = entry.text.get(player).parsePlaceholders(player)
+        speakerDisplayName = DepartedLang.tr(player, entry.speakerDisplayName.get(player)).parsePlaceholders(player)
+        val sourceText = entry.text.get(player)
+        val localText = DepartedLang.tr(player, sourceText)
+        text = localText.parsePlaceholders(player)
         typingDuration = typingDurationType.totalDuration(text.stripped(), entry.duration.get(player))
 
         confirmationKeyHandler = confirmationKey.handler(player) {
@@ -60,7 +63,7 @@ class JavaActionBarDialogueDialogueMessenger(
         val stopVoice  = entry.stopvoice.get(player)       // Stop previous talking
 
         // Choose the line to speak: voicetext (if not blank) else the regular text
-        val chosenVoiceLineRaw = voiceText?.takeIf { it.isNotBlank() } ?: text
+        val chosenVoiceLineRaw = DepartedLang.voice(player, voiceText, sourceText, localText)
         val chosenVoiceLine = chosenVoiceLineRaw
             .parsePlaceholders(player)
             .stripped()

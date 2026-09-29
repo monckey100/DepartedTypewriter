@@ -1,5 +1,6 @@
 package gg.departed.basic.entries.dialogue.messengers.spoken
 
+import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.DialogueMountControl
 import gg.departed.basic.entries.dialogue.LastSpeakerTracker
 import gg.departed.basic.entries.dialogue.NpcNodController
@@ -84,8 +85,10 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
     override fun init() {
         super.init()
         talkIndicator.init()
-        speakerDisplayName = entry.speakerDisplayName.get(player).parsePlaceholders(player)
-        text = entry.text.get(player).parsePlaceholders(player)
+        speakerDisplayName = DepartedLang.tr(player, entry.speakerDisplayName.get(player)).parsePlaceholders(player)
+        val sourceText = entry.text.get(player)
+        val localText = DepartedLang.tr(player, sourceText)
+        text = localText.parsePlaceholders(player)
         typingDuration = typingDurationType.totalDuration(text.stripped(), entry.duration.get(player))
 
         // voice settings (locals cannot be 'private')
@@ -94,7 +97,7 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
         val stopVoice  = entry.stopvoice.get(player)  // Stop previous talking first?
         val cutVoice = entry.cutvoice.get(player)
         // Choose line: voicetext if non-blank, else the regular parsed 'text'
-        val chosenVoiceLine = (voiceText?.takeIf { it.isNotBlank() } ?: text)
+        val chosenVoiceLine = DepartedLang.voice(player, voiceText, sourceText, localText)
             .parsePlaceholders(player)
             .stripped()
 

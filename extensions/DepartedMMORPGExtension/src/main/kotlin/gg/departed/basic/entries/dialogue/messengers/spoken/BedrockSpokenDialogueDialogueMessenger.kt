@@ -1,5 +1,6 @@
 package gg.departed.basic.entries.dialogue.messengers.spoken
 
+import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.LastSpeakerTracker
 import gg.departed.basic.entries.dialogue.SpokenDialogueEntry
 import gg.departed.basic.entries.dialogue.TalkIndicator
@@ -28,7 +29,7 @@ class BedrockSpokenDialogueDialogueMessenger(player: Player, context: Interactio
         // Remember who is talking so out-of-band NPC speech (quest-busy line) can use them.
         LastSpeakerTracker.record(
             player.uniqueId,
-            entry.speakerDisplayName.get(player).parsePlaceholders(player),
+            DepartedLang.tr(player, entry.speakerDisplayName.get(player)).parsePlaceholders(player),
             entry.voice.get(player),
             null
         )
@@ -45,12 +46,12 @@ class BedrockSpokenDialogueDialogueMessenger(player: Player, context: Interactio
             org.geysermc.cumulus.form.SimpleForm.builder()
                 .title(
                     spokenTitle.parsePlaceholders(player).legacy(
-                        Placeholder.parsed("speaker", entry.speakerDisplayName.get(player).parsePlaceholders(player))
+                        Placeholder.parsed("speaker", DepartedLang.tr(player, entry.speakerDisplayName.get(player)).parsePlaceholders(player))
                     )
                 )
                 .content(
                     spokenContent.parsePlaceholders(player).legacy(
-                        Placeholder.parsed("message", entry.text.get(player).parsePlaceholders(player))
+                        Placeholder.parsed("message", DepartedLang.tr(player, entry.text.get(player)).parsePlaceholders(player))
                     )
                 )
                 .button(spokenButton.parsePlaceholders(player).legacy())
