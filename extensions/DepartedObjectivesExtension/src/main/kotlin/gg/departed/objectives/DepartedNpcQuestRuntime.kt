@@ -43,17 +43,23 @@ class DepartedNpcQuestVisibilityEntry(
     @Help("Extra quest-state checks for sequential questlines.")
     val requirements: List<DepartedQuestStateRequirement> = emptyList(),
 ) : StaticEntry {
-    fun isVisibleFor(player: Player): Boolean {
+    /** Null while the player's quest snapshot is still loading. */
+    fun isVisibleFor(player: Player): Boolean? {
         if (questId.isBlank()) return false
         val states = visibleStates.ifEmpty { listOf(QuestState.READY, QuestState.REPEATABLE, QuestState.CURRENT) }
-        if (DepartedRpgBridge.questState(player, questId) !in states) return false
-        return requirements.all { it.matchesRequirement(player) }
+        val state = DepartedRpgBridge.questStateCached(player, questId) ?: return null
+        if (state !in states) return false
+        for (requirement in requirements) {
+            if (!(requirement.matchesRequirement(player) ?: return null)) return false
+        }
+        return true
     }
 }
 
-private fun DepartedQuestStateRequirement.matchesRequirement(player: Player): Boolean {
+private fun DepartedQuestStateRequirement.matchesRequirement(player: Player): Boolean? {
     if (questId.isBlank()) return !inverted
-    val matches = DepartedRpgBridge.questState(player, questId) in states.ifEmpty { listOf(QuestState.COMPLETE) }
+    val state = DepartedRpgBridge.questStateCached(player, questId) ?: return null
+    val matches = state in states.ifEmpty { listOf(QuestState.COMPLETE) }
     return if (inverted) !matches else matches
 }
 
@@ -66,6 +72,9 @@ private fun DepartedQuestStateRequirement.matchesRequirement(player: Player): Bo
 class DepartedNpcQuestRuntime : Initializable {
     private var task: BukkitTask? = null
     private val managedVisibility = HashSet<String>()
+
+    /** Per-player NPCs whose visibility we have decided from a loaded quest snapshot. */
+    private val decidedVisibility = HashMap<UUID, MutableSet<String>>()
 
     /** Per-player npc -> marker token we currently have set, so we only re-send on change. */
     private val shown = HashMap<UUID, MutableMap<String, String>>()
@@ -113,15 +122,28 @@ class DepartedNpcQuestRuntime : Initializable {
         val manager = objectiveManager()
 
         for (player in server.onlinePlayers) {
+            // Quest snapshot still loading (join / character switch): leave this player's markers as
+            // they are and try again next poll rather than guess.
+            val states = HashMap<String, QuestState>()
+            var loading = false
+            for ((key, group) in byQuest) {
+                val state = DepartedRpgBridge.questStateCached(player, group.first().questId)
+                if (state == null) {
+                    loading = true
+                    break
+                }
+                states[key] = state
+            }
+            if (loading) continue
+
             val want = HashMap<String, String>()
 
-            byQuest.forEach { (_, group) ->
+            byQuest.forEach { (key, group) ->
                 val ordered = group.sortedWith(compareBy<DepartedNpcObjectiveEntry> { it.order }.thenBy { it.id })
-                val questId = ordered.first().questId
                 val target: DepartedNpcObjectiveEntry?
                 val token: String
 
-                when (DepartedRpgBridge.questState(player, questId)) {
+                when (states.getValue(key)) {
                     QuestState.CURRENT -> {
                         target = ordered.firstOrNull { !manager.isComplete(player, it) }
                         token = target?.let { "PAPER:${it.marker.effectiveCurrentModelData()}" }.orEmpty()
@@ -171,9 +193,22 @@ class DepartedNpcQuestRuntime : Initializable {
         byNpc.forEach { (npcId, group) ->
             managedVisibility.add(npcId)
             server.onlinePlayers.forEach { player ->
-                api.setDynamicVisibility(player, npcId, group.any { it.isVisibleFor(player) })
+                val decided = decidedVisibility.getOrPut(player.uniqueId) { HashSet() }
+                val results = group.map { it.isVisibleFor(player) }
+                if (results.any { it == null }) {
+                    // Snapshot still loading. Keep an NPC we already decided as it is (the refetch is a
+                    // few ms); one never decided stays hidden so a retired scene NPC can't flash in.
+                    if (npcId !in decided) api.setDynamicVisibility(player, npcId, false)
+                    return@forEach
+                }
+                decided.add(npcId)
+                api.setDynamicVisibility(player, npcId, results.any { it == true })
             }
         }
+
+        // Drop tracking for players who logged off, and for NPCs no longer managed.
+        decidedVisibility.keys.retainAll(server.onlinePlayers.map { it.uniqueId }.toSet())
+        decidedVisibility.values.forEach { it.retainAll(managedVisibility) }
     }
 
     private companion object {

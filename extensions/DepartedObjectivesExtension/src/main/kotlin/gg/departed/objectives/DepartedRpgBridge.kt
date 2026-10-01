@@ -28,9 +28,16 @@ object DepartedRpgBridge {
 
     fun questGuidance(player: Player, questId: String): String = api?.getQuestGuidance(player, questId).orEmpty()
 
-    fun questState(player: Player, questId: String): QuestState {
+    /**
+     * Quest state from DepartedRPG's in-memory quest snapshot, never MySQL: the NPC marker/visibility
+     * poll runs on the main thread, and a DB read there froze the server when the pool hung
+     * (2026-09-30). Can trail a quest write by a few ms. Null while the player's snapshot is still
+     * loading (join, character switch) — callers must leave that player alone, not treat it as LOCKED.
+     */
+    fun questStateCached(player: Player, questId: String): QuestState? {
         if (questId.isBlank()) return QuestState.LOCKED
-        return api?.getQuestState(player, questId) ?: QuestState.LOCKED
+        val api = api ?: return QuestState.LOCKED
+        return api.getQuestStateCached(player, questId).orElse(null)
     }
 
     fun completeQuest(player: Player, questId: String) {
