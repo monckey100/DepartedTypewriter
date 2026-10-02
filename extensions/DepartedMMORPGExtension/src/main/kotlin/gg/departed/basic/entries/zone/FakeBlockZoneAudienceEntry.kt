@@ -95,6 +95,9 @@ class FakeBlockZoneDisplay(
         }
         fakedPositions[player.uniqueId] = positions
         fakeBlockData[player.uniqueId] = data
+        // Let the click relay know these blocks exist for this player, so hitting one reads as an
+        // interaction instead of a swing at thin air.
+        FakeBlockTracker.track(player.uniqueId, positions)
 
         positions.forEach { player.sendFakeBlock(it, data) }
     }
@@ -129,6 +132,9 @@ class FakeBlockZoneDisplay(
     override fun onPlayerRemove(player: Player) {
         val positions = fakedPositions.remove(player.uniqueId) ?: return
         fakeBlockData.remove(player.uniqueId)
+        // Stop relaying clicks here immediately. The gate removal below can take several ticks, and
+        // during it the blocks are already gone as far as the quest is concerned.
+        FakeBlockTracker.untrack(player.uniqueId, positions)
         val context = player.interactionContext
         val particle = entry.removalParticle.get(player, context)
 

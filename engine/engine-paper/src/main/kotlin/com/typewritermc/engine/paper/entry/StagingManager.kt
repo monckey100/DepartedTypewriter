@@ -32,7 +32,7 @@ interface StagingManager {
     val stagingState: StagingState
     val pages: Map<String, JsonObject>
 
-    fun loadState()
+    fun loadState(seedStaging: Boolean = false)
     fun unload()
     fun createPage(data: JsonObject): Result<String>
     fun renamePage(pageId: String, newName: String): Result<String>
@@ -78,17 +78,39 @@ class StagingManagerImpl : StagingManager, KoinComponent {
             StagingChangeEvent(value).callEvent()
         }
 
-    override fun loadState() {
-        stagingState = if (stagingDir.exists()) STAGING else PUBLISHED
+    override fun loadState(seedStaging: Boolean) {
+        val hasStaging = stagingDir.exists()
+        stagingState = if (hasStaging) STAGING else PUBLISHED
 
-        // Read the pages from the file
-        val dir = if (stagingState == STAGING) stagingDir else publishedDir
-        _pages = ConcurrentHashMap(fetchPages(dir))
+        val pages = if (hasStaging) {
+            val stagedPages = fetchPages(stagingDir).toMutableMap()
+            if (seedStaging) {
+                stagedPages.putAll(fetchMissingPublishedPages(stagedPages.keys))
+            }
+            stagedPages
+        } else {
+            fetchPages(publishedDir)
+        }
+
+        _pages = ConcurrentHashMap(pages)
+
+        if (seedStaging) saveStaging()
     }
 
-    private fun fetchPages(dir: File): Map<String, JsonObject> {
+    private fun fetchMissingPublishedPages(stagedPageIds: Set<String>): Map<String, JsonObject> {
+        val latestStagedModification = stagingDir.listFiles()
+            ?.filter { it.extension == "json" }
+            ?.maxOfOrNull { it.lastModified() }
+            ?: stagingDir.lastModified()
+
+        return fetchPages(publishedDir) { file ->
+            file.nameWithoutExtension !in stagedPageIds && file.lastModified() > latestStagedModification
+        }
+    }
+
+    private fun fetchPages(dir: File, shouldRead: (File) -> Boolean = { true }): Map<String, JsonObject> {
         val pages = mutableMapOf<String, JsonObject>()
-        dir.listFiles()?.filter { it.extension == "json" }?.forEach { file ->
+        dir.listFiles()?.filter { it.extension == "json" && shouldRead(it) }?.forEach { file ->
             val page = file.readText()
             val pageId = file.nameWithoutExtension
             val pageJson = gson.fromJson(page, JsonObject::class.java)
@@ -100,7 +122,8 @@ class StagingManagerImpl : StagingManager, KoinComponent {
     }
 
     override fun unload() {
-        autoSaver.force()
+        autoSaver.cancel()
+        _pages = null
     }
 
     override fun createPage(data: JsonObject): Result<String> {
@@ -300,7 +323,7 @@ class StagingManagerImpl : StagingManager, KoinComponent {
 
                 // Delete the staging folder
                 stagingDir.deleteRecursively()
-                plugin.reload()
+                plugin.reload(seedStaging = false)
                 stagingState = PUBLISHED
                 ok("Successfully published the staging state")
             } catch (e: Exception) {

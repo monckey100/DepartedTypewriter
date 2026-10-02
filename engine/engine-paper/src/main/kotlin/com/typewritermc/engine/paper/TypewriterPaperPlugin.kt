@@ -177,11 +177,11 @@ class TypewriterPaperPlugin : KotlinPlugin(), KoinComponent {
         }
     }
 
-    suspend fun load() {
+    suspend fun load(seedStaging: Boolean = false) {
         // Needs to be first, as it will load the classLoader
         get<TypewriterCore>().load()
 
-        get<StagingManager>().loadState()
+        get<StagingManager>().loadState(seedStaging)
         get<CommunicationHandler>().load()
         get<PlayerSessionManager>().load()
         get<EntryListeners>().load()
@@ -212,9 +212,9 @@ class TypewriterPaperPlugin : KotlinPlugin(), KoinComponent {
         get<TypewriterCore>().unload()
     }
 
-    suspend fun reload() {
+    suspend fun reload(seedStaging: Boolean = true) {
         unload()
-        load()
+        load(seedStaging)
     }
 
     val isGeyserInstalled: Boolean by lazy { server.pluginManager.isPluginEnabled("Geyser-Spigot") }

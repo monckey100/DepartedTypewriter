@@ -35,6 +35,7 @@ import kotlinx.coroutines.future.await
 import me.tofaa.entitylib.meta.display.TextDisplayMeta
 import me.tofaa.entitylib.meta.mobs.villager.VillagerMeta
 import me.tofaa.entitylib.wrapper.WrapperEntity
+import org.bukkit.GameMode
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
@@ -98,6 +99,12 @@ class LockInteractionBound(
     private var previousPosition: Position = Position.ORIGIN
     private var interceptor: InterceptionBundle? = null
 
+    // Exactly who we hid, so dispose can un-hide exactly those. A VISIBLE_PLAYERS/SHOWING_PLAYER
+    // snapshot cannot be trusted here: this bound is set up while the dialogue's camera cinematic has
+    // already hidden everyone, so the snapshot comes back empty and restores nobody, leaving both
+    // sides hidden until relog.
+    private val hiddenPlayers = mutableSetOf<UUID>()
+
     override suspend fun initialize() {
         super.initialize()
         if (player.boundState == InteractionBoundState.IGNORING) {
@@ -108,7 +115,7 @@ class LockInteractionBound(
 
     private suspend fun setup() {
         require(playerState == null)
-        playerState = player.state(LOCATION, FLYING, ALLOW_FLIGHT, VISIBLE_PLAYERS, SHOWING_PLAYER)
+        playerState = player.state(LOCATION, FLYING, ALLOW_FLIGHT)
         player.allowFlight = true
         player.isFlying = true
         // For bedrock players we don't need to fake the inventory as we already hide the hotbar and item.
@@ -117,9 +124,10 @@ class LockInteractionBound(
         }
 
         Dispatchers.Sync.switchContext {
-            server.onlinePlayers.forEach {
+            server.onlinePlayers.filter { it.uniqueId != player.uniqueId }.forEach {
                 it.hidePlayer(plugin, player)
                 player.hidePlayer(plugin, it)
+                hiddenPlayers += it.uniqueId
             }
         }
 
@@ -184,8 +192,27 @@ class LockInteractionBound(
             player.restoreInventory()
         }
         Dispatchers.Sync.switchContext {
+            // Un-hide exactly who we hid, in both directions, BEFORE any restore that could fail —
+            // leaked hides keep the player invisible to everyone until each observer relogs.
+            // Paper keys hidden entities per plugin, so this only undoes Typewriter's own hides
+            // and leaves a vanish plugin's hide intact.
+            hiddenPlayers.forEach { uuid ->
+                val other = server.getPlayer(uuid) ?: return@forEach
+                other.showPlayer(plugin, player)
+                player.showPlayer(plugin, other)
+            }
+            hiddenPlayers.clear()
+
             player.restore(playerState)
             playerState = null
+
+            // The lock forces flight on to pin the player in place. If this bound was set up while a
+            // cinematic already had camera flight on, the snapshot above is polluted and restore()
+            // would leave a survival player able to fly. Flight is only legitimate in creative/spectator.
+            if (player.gameMode != GameMode.CREATIVE && player.gameMode != GameMode.SPECTATOR) {
+                player.isFlying = false
+                player.allowFlight = false
+            }
         }
     }
 

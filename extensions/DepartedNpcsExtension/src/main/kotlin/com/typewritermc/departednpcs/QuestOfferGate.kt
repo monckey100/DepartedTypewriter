@@ -147,6 +147,14 @@ object QuestOfferGate {
         api: DepartedRpgAPI,
         speaker: Speaker?,
     ): BlockedOffer? {
+        // The activation command's own criteria ARE evaluated: runtime checks them before
+        // dispatching, so an activation whose criteria don't match at click time can never fire
+        // from this click. Without this, a criteria-gated fallback start (e.g. town Benny's
+        // quest-1 catch-up for tutorial skippers) reads as a blocked offer for every veteran
+        // with an active quest and swallows the whole conversation, turn-ins included. Criteria
+        // that only become true mid-conversation make the walk miss a block here, which just
+        // falls back to the old late rejection — the documented tradeoff above.
+        if (!entry.criteria.matches(player, context)) return null
         for (line in entry.command.get(player, context).lines()) {
             val match = ACTIVATION.find(line.trim().removePrefix("/")) ?: continue
             val subcommand = match.groupValues[1].lowercase()

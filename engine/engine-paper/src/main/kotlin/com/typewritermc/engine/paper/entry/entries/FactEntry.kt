@@ -9,6 +9,7 @@ import com.typewritermc.engine.paper.entry.*
 import com.typewritermc.engine.paper.facts.FactData
 import com.typewritermc.engine.paper.facts.FactDatabase
 import com.typewritermc.engine.paper.facts.FactId
+import com.typewritermc.engine.paper.facts.ProfileScope
 import com.typewritermc.engine.paper.utils.server
 import org.bukkit.entity.Player
 import org.koin.java.KoinJavaComponent.get
@@ -36,8 +37,9 @@ interface FactEntry : StaticEntry {
             // If the player is not in an group, we don't want to do anything with this fact
             entry.groupId(player) ?: return null
         } else {
-            // If no group entry is set, we assume that the player is the group for backwards compatibility
-            GroupId(player.uniqueId)
+            // No explicit group: scope the fact to the player's active character
+            // (DepartedProfiles). Account-wide facts opt in via an explicit group.
+            ProfileScope.groupId(player)
         }
 
         return FactId(id, groupId)
@@ -54,8 +56,9 @@ interface ReadableFactEntry : FactEntry, PlaceholderEntry {
     fun readForGroup(groupId: GroupId): FactData {
         val entry = group.get()
         if (entry == null) {
-            // If no group entry is set, we assume that the player is the group for backwards compatibility
-            val player = server.getPlayer(UUID.fromString(groupId.id)) ?: return FactData(0)
+            // No explicit group: the groupId is the active character's profile UUID.
+            // Resolve it back to the online player it belongs to.
+            val player = ProfileScope.playerFor(groupId) ?: return FactData(0)
             return readSinglePlayer(player)
         }
         val group = entry.group(groupId)

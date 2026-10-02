@@ -42,6 +42,9 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.entity.EntityTargetEvent
 import org.bukkit.event.entity.EntityTargetLivingEntityEvent
+import org.bukkit.event.player.PlayerChangedWorldEvent
+import org.bukkit.event.player.PlayerJoinEvent
+import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.SkullMeta
 import org.bukkit.potion.PotionEffect
@@ -143,7 +146,20 @@ class CameraCinematicAction(
     private var listener: Listener? = null
     private var boundStateSubscription: InteractionBoundStateOverrideSubscription? = null
 
+    // Exactly who we hid, so teardown can un-hide exactly those. Do NOT derive this from a
+    // VISIBLE_PLAYERS/SHOWING_PLAYER snapshot: when a cinematic and a lock bound are both active
+    // (every dialogue), whichever starts second snapshots a world where the first already hid
+    // everyone, so its snapshot is empty and its restore un-hides nobody. The hides then survive
+    // until relog. Same class of bug as the flight snapshot pollution handled in teardown below.
+    private val hiddenPlayers = mutableSetOf<UUID>()
+
     private var lastFrame: Int = 0
+
+    // The UUID of the world the camera is currently rendering in. A camera cinematic teleports the
+    // player across worlds to render the camera, which fires a PlayerChangedWorldEvent. We track the
+    // expected world so the safety-net listener below can tell our OWN cross-world teleport apart
+    // from an external move (e.g. MythicDungeons ending the dungeon) that should abort the cinematic.
+    private var cameraWorldUid: UUID? = null
 
     override suspend fun setup() {
         action = if (player.isFloodgate) {
@@ -165,6 +181,12 @@ class CameraCinematicAction(
         val segment = (entry.segments activeSegmentAt frame)
 
         if (segment != previousSegment) {
+            // Record the world this segment's camera lives in BEFORE the action teleports the
+            // player there, so the PlayerChangedWorldEvent safety net can recognise our own move.
+            if (segment != null) {
+                cameraWorldUid = segment.path.firstOrNull()?.location?.get(player)?.world
+                    ?.let { runCatching { UUID.fromString(it.identifier) }.getOrNull() }
+            }
             if (previousSegment == null && segment != null) {
                 player.setup()
                 action.startSegment(segment)
@@ -202,8 +224,6 @@ class CameraCinematicAction(
                     LOCATION,
                     ALLOW_FLIGHT,
                     FLYING,
-                    VISIBLE_PLAYERS,
-                    SHOWING_PLAYER,
                     EffectStateProvider(INVISIBILITY),
                     VELOCITY.takeIf { entry.advancedCameraSettings.restoreVelocity }
                 )
@@ -219,6 +239,7 @@ class CameraCinematicAction(
             server.onlinePlayers.filter { it.uniqueId != uniqueId }.forEach {
                 it.hidePlayer(plugin, this@setup)
                 this@setup.hidePlayer(plugin, it)
+                hiddenPlayers += it.uniqueId
             }
 
             // In creative mode, when the player opens the inventory while their inventory is fake cleared,
@@ -245,6 +266,32 @@ class CameraCinematicAction(
         plugin.listen<EntityTargetLivingEntityEvent>(listener = listener!!) {
             if (it.target?.uniqueId != player?.uniqueId) return@listen
             it.isCancelled = true
+        }
+        // Safety net: a normal camera cinematic only fakes the player's position via packets,
+        // so it never triggers a real world change. If the player IS moved to another world
+        // (e.g. MythicDungeons ending the dungeon mid-cinematic) or quits, the cinematic — which
+        // ignores bound-state changes — would otherwise keep them invisible and flying forever.
+        plugin.listen<PlayerChangedWorldEvent>(listener = listener!!) {
+            if (it.player.uniqueId != player?.uniqueId) return@listen
+            // The camera cinematic teleports the player across worlds to render the camera, which
+            // fires this event. Ignore changes INTO the camera's own world (our own teleport); only
+            // a change to a DIFFERENT world is an external move (e.g. MythicDungeons) that must end it.
+            if (cameraWorldUid != null && it.player.world.uid == cameraWorldUid) return@listen
+            player?.emergencyEndCinematic()
+        }
+        plugin.listen<PlayerQuitEvent>(listener = listener!!) {
+            if (it.player.uniqueId != player?.uniqueId) return@listen
+            player?.emergencyEndCinematic()
+        }
+        // A player joining mid-cinematic missed the hide loop in setup. Hide them too (so they don't
+        // pop into the shot) and record them, so teardown un-hides them like everyone else.
+        plugin.listen<PlayerJoinEvent>(listener = listener!!) {
+            val self = player ?: return@listen
+            val joiner = it.player
+            if (joiner.uniqueId == self.uniqueId) return@listen
+            joiner.hidePlayer(plugin, self)
+            self.hidePlayer(plugin, joiner)
+            hiddenPlayers += joiner.uniqueId
         }
         interceptor = this.interceptPackets {
             // If the player is a bedrock player, we don't want to modify the location.
@@ -274,11 +321,51 @@ class CameraCinematicAction(
         }
     }
 
+    /**
+     * Cleans up the cinematic-applied state in place when the player is pulled out of the
+     * cinematic by an external force (world change / quit). Unlike [teardown] it does NOT
+     * restore the original location — the player was intentionally moved elsewhere, so
+     * teleporting them back (into a now-ending dungeon) would be wrong. Clearing
+     * [originalState] also prevents the eventual [teardown] from doing that restore.
+     */
+    /**
+     * Lifts every hide this cinematic applied, in both directions. Paper keys hidden entities per
+     * plugin, so this only ever undoes Typewriter's own hides — a vanish plugin's hide survives.
+     */
+    private fun Player.showHiddenPlayers() {
+        hiddenPlayers.forEach { uuid ->
+            val other = server.getPlayer(uuid) ?: return@forEach
+            other.showPlayer(plugin, this)
+            this.showPlayer(plugin, other)
+        }
+        hiddenPlayers.clear()
+    }
+
+    private fun Player.emergencyEndCinematic() {
+        if (originalState == null) return
+
+        removePotionEffect(INVISIBILITY)
+        isFlying = false
+        allowFlight = gameMode == GameMode.CREATIVE || gameMode == GameMode.SPECTATOR
+        showHiddenPlayers()
+
+        interceptor?.cancel()
+        interceptor = null
+        originalState = null
+
+        // End the interaction so the normal teardown lifecycle runs (now a no-op for state).
+        interruptInteraction()
+    }
+
     private suspend fun Player.teardown() {
         listener?.unregister()
         listener = null
 
         Dispatchers.Sync.switchContext {
+            // Un-hide before anything that can fail: if the hides outlive this block,
+            // the player stays invisible to everyone until each observer relogs.
+            showHiddenPlayers()
+
             interceptor?.cancel()
             interceptor = null
 
@@ -286,6 +373,26 @@ class CameraCinematicAction(
                 restore(it)
             }
             originalState = null
+
+            // Do not trust the snapshot for invisibility either. When cinematics chain, this
+            // cinematic's snapshot can hold the previous cinematic's infinite invisibility, and
+            // restore() above faithfully re-applies it — leaving the player permanently invisible
+            // (DepartedPlayerModels also hides the whole player model while the potion is active).
+            // Infinite duration is the camera's own signature; a class ability's is finite.
+            val leftoverInvisibility = getPotionEffect(INVISIBILITY)
+            if (leftoverInvisibility != null && leftoverInvisibility.duration < 0) {
+                removePotionEffect(INVISIBILITY)
+            }
+
+            // Do not trust the snapshot for flight. When one cinematic triggers another (the tutorial
+            // outro chains wormhole -> lumbridge), the next cinematic can capture its "original" state
+            // while the previous one still has camera flight forced on — and restore() would then
+            // faithfully hand flight back to a survival player. Flight is only ever legitimate in
+            // creative/spectator, which is the same invariant emergencyEndCinematic already applies.
+            if (gameMode != GameMode.CREATIVE && gameMode != GameMode.SPECTATOR) {
+                isFlying = false
+                allowFlight = false
+            }
 
             if (gameMode != GameMode.CREATIVE && !isFloodgate) {
                 restoreInventory()

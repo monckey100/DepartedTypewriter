@@ -36,7 +36,12 @@ data class PlayerState(
 
 enum class GenericPlayerStateProvider(private val store: Player.() -> Any, private val restore: Player.(Any) -> Unit) :
     PlayerStateProvider {
-    LOCATION({ location }, { teleport(it as Location) }),
+    LOCATION({ location }, {
+        val location = it as Location
+        // The stored world may no longer exist at restore time (e.g. a MythicDungeons
+        // instance world unloaded when the dungeon ended); teleporting there throws.
+        if (location.isWorldLoaded) teleport(location)
+    }),
     GAME_MODE({ gameMode }, { gameMode = it as GameMode }),
     EXP({ exp }, { exp = it as Float }),
     LEVEL({ level }, { level = it as Int }),
@@ -132,7 +137,13 @@ fun Player.state(keys: List<PlayerStateProvider>): PlayerState {
 }
 
 fun Player.restore(state: PlayerState?) {
-    state?.state?.forEach { (key, value) -> key.restore(this, value) }
+    state?.state?.forEach { (key, value) ->
+        // One failing provider must not abort the rest: callers run cleanup (like
+        // un-hiding this player from everyone) after restore, and a propagated
+        // exception would leave that state applied until relog.
+        runCatching { key.restore(this, value) }
+            .onFailure { plugin.logger.warning("Failed to restore $key for $name: ${it.message}") }
+    }
 }
 
 val fakeAir: com.github.retrooper.packetevents.protocol.item.ItemStack by lazy {
@@ -197,6 +208,9 @@ fun InterceptionBundle.keepFakeInventory() {
     }
     PacketType.Play.Server.SET_SLOT { event ->
         val packet = WrapperPlayServerSetSlot(event)
+        // Leave the helmet slot (raw slot 39) alone: the Pumpkin Hat Cinematic owns it via its
+        // own packets, and blanking it here would wipe the first-person pumpkin overlay.
+        if (packet.slot == 39) return@SET_SLOT
         packet.item = if (packet.slot in 0..8) fakeAir
         else com.github.retrooper.packetevents.protocol.item.ItemStack.EMPTY
     }

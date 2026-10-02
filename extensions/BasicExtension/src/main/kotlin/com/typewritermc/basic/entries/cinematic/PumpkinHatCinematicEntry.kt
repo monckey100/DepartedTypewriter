@@ -1,7 +1,8 @@
 package com.typewritermc.basic.entries.cinematic
 
-import com.github.retrooper.packetevents.protocol.packettype.PacketType
+import com.github.retrooper.packetevents.protocol.item.ItemStack.EMPTY
 import com.github.retrooper.packetevents.protocol.player.Equipment
+import com.github.retrooper.packetevents.protocol.player.EquipmentSlot
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityEquipment
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetSlot
 import com.typewritermc.core.books.pages.Colors
@@ -15,8 +16,6 @@ import com.typewritermc.engine.paper.entry.entries.Var
 import com.typewritermc.engine.paper.entry.temporal.SimpleCinematicAction
 import com.typewritermc.engine.paper.extensions.packetevents.sendPacketTo
 import com.typewritermc.engine.paper.extensions.packetevents.toPacketItem
-import com.typewritermc.engine.paper.interaction.InterceptionBundle
-import com.typewritermc.engine.paper.interaction.interceptPackets
 import com.typewritermc.engine.paper.utils.item.Item
 import com.typewritermc.engine.paper.utils.name
 import com.typewritermc.engine.paper.utils.unClickable
@@ -24,6 +23,7 @@ import org.bukkit.Material
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import java.util.*
+import com.github.retrooper.packetevents.protocol.item.ItemStack as PacketItemStack
 
 @Entry("pumpkin_hat_cinematic", "Show a pumpkin hat during a cinematic", Colors.CYAN, "mingcute:hat-fill")
 /**
@@ -61,7 +61,9 @@ class PumpkinHatCinematicAction(
 ) : SimpleCinematicAction<PumpkinHatSegment>() {
     override val segments: List<PumpkinHatSegment> = entry.segments
 
-    private var interceptor: InterceptionBundle? = null
+    // The fake helmet item currently shown, or null when no segment is active.
+    // This is purely a client-side packet illusion; the real inventory is never touched.
+    private var helmetItem: PacketItemStack? = null
 
     override suspend fun startSegment(segment: PumpkinHatSegment) {
         super.startSegment(segment)
@@ -81,34 +83,43 @@ class PumpkinHatCinematicAction(
                 }
         }
             .toPacketItem()
-        interceptor = player.interceptPackets {
-            PacketType.Play.Server.SET_SLOT { event ->
-                val packet = WrapperPlayServerSetSlot(event)
-                if (packet.slot != 39) return@SET_SLOT
-                packet.item = item
-            }
-        }
+        helmetItem = item
 
-        WrapperPlayServerEntityEquipment(
-            player.entityId,
-            listOf(Equipment(com.github.retrooper.packetevents.protocol.player.EquipmentSlot.HELMET, item))
-        ) sendPacketTo player
+        // The first-person pumpkin overlay is rendered from the client's OWN inventory helmet
+        // slot, so we have to fake that slot for the player. Third-person (F5 / other viewers)
+        // reads the entity equipment instead, so we send that too.
+        sendHelmetSlot(item)
+        sendHelmetEquipment(item)
+    }
 
+    override suspend fun tickSegment(segment: PumpkinHatSegment, frame: Int) {
+        super.tickSegment(segment, frame)
+        // Re-assert every tick. A Camera Cinematic running in parallel fake-clears the inventory
+        // (see keepFakeInventory), which would otherwise wipe the fake helmet depending on the
+        // order the cinematics tick in. Re-sending keeps the overlay stable regardless.
+        helmetItem?.let { sendHelmetSlot(it) }
     }
 
     override suspend fun stopSegment(segment: PumpkinHatSegment) {
         super.stopSegment(segment)
-        interceptor?.cancel()
-        interceptor = null
+        helmetItem = null
+        // Restore the client's view of the real helmet via packets. We only read the real
+        // inventory here; we never write to it.
+        val realHelmet = player.inventory.helmet?.toPacketItem() ?: EMPTY
+        sendHelmetSlot(realHelmet)
+        sendHelmetEquipment(realHelmet)
+    }
+
+    // Slot 39 is the helmet in the raw player-inventory numbering used with window id -2,
+    // matching how the engine restores inventories (see restoreInventory).
+    private fun sendHelmetSlot(item: PacketItemStack) {
+        WrapperPlayServerSetSlot(-2, 0, 39, item) sendPacketTo player
+    }
+
+    private fun sendHelmetEquipment(item: PacketItemStack) {
         WrapperPlayServerEntityEquipment(
             player.entityId,
-            listOf(
-                Equipment(
-                    com.github.retrooper.packetevents.protocol.player.EquipmentSlot.HELMET,
-                    player.inventory.helmet?.toPacketItem()
-                        ?: com.github.retrooper.packetevents.protocol.item.ItemStack.EMPTY
-                )
-            )
+            listOf(Equipment(EquipmentSlot.HELMET, item))
         ) sendPacketTo player
     }
 }

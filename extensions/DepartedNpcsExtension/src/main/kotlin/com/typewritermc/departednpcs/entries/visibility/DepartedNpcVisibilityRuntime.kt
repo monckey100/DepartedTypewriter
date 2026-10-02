@@ -20,8 +20,25 @@ class DepartedNpcVisibilityRuntime : Initializable {
     private val managed = HashSet<String>()
 
     override suspend fun initialize() {
-        task = server.scheduler.runTaskTimer(plugin, Runnable { tick() }, POLL_INTERVAL_TICKS, POLL_INTERVAL_TICKS)
+        // A throw out of tick() would cancel the repeating task and silently freeze every NPC's
+        // criteria visibility at its last state for the rest of the session (e.g. a quest NPC
+        // staying visible after its hide-fact flipped). Contain and log instead, throttled so a
+        // persistently broken fact read doesn't flood the console.
+        task = server.scheduler.runTaskTimer(plugin, Runnable {
+            try {
+                tick()
+            } catch (t: Throwable) {
+                val now = System.currentTimeMillis()
+                if (now - lastErrorLoggedAt > 10_000) {
+                    lastErrorLoggedAt = now
+                    plugin.logger.warning("NPC criteria-visibility tick failed (visibility is stale until this is fixed): $t")
+                    t.stackTrace.take(6).forEach { plugin.logger.warning("  at $it") }
+                }
+            }
+        }, POLL_INTERVAL_TICKS, POLL_INTERVAL_TICKS)
     }
+
+    private var lastErrorLoggedAt = 0L
 
     override suspend fun shutdown() {
         task?.cancel()
