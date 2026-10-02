@@ -22,6 +22,8 @@ import io.netty.buffer.ByteBuf
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.TextComponent
 import net.kyori.adventure.text.TranslatableComponent
+import net.kyori.adventure.text.event.HoverEvent
+import net.kyori.adventure.text.TranslationArgument
 import net.kyori.adventure.text.format.TextColor
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
@@ -90,6 +92,26 @@ class ResendTokenRegistry {
             true
         } ?: false
     }
+}
+
+/**
+ * The history copy of a message with every show_item hover removed (the live message is untouched).
+ * PacketEvents decodes an item hover's data components as NbtTagHolder, which Paper can't convert back
+ * when the history is resent, so one item-hover chat line (e.g. a /show broadcast) failed every later
+ * dialogue packet for that player until they relogged.
+ */
+internal fun Component.historySafe(): Component {
+    var c = this
+    if (c.hoverEvent()?.action() == HoverEvent.Action.SHOW_ITEM) c = c.hoverEvent(null)
+    if (c is TranslatableComponent && c.arguments().isNotEmpty()) {
+        c = c.arguments(c.arguments().map { arg ->
+            val v = arg.value()
+            if (v is Component) TranslationArgument.component(v.historySafe()) else arg
+        })
+    }
+    val kids = c.children()
+    if (kids.isNotEmpty()) c = c.children(kids.map { it.historySafe() })
+    return c
 }
 
 class ChatHistoryHandler :
@@ -172,11 +194,11 @@ class ChatHistoryHandler :
             PacketType.Play.Server.CHAT_MESSAGE -> {
                 val packet = WrapperPlayServerChatMessage(event)
                 val message =
-                    packet.message as? ChatMessage_v1_19_3 ?: return Message.TextMessage(packet.message.chatContent)
+                    packet.message as? ChatMessage_v1_19_3 ?: return Message.TextMessage(packet.message.chatContent.historySafe())
                 val component = message.unsignedChatContent.orElseGet {
                     Component.translatable("chat.type.text", message.chatFormatting.name, message.chatContent)
                 }
-                Message.PlayerMessage(component, packet)
+                Message.PlayerMessage(component.historySafe(), packet)
             }
 
             PacketType.Play.Server.DISGUISED_CHAT -> {
@@ -185,14 +207,14 @@ class ChatHistoryHandler :
                     packet.chatFormatting.type.chatDecoration.decorate(
                         packet.message,
                         packet.chatFormatting
-                    )
+                    ).historySafe()
                 )
             }
 
             PacketType.Play.Server.SYSTEM_CHAT_MESSAGE -> {
                 val packet = WrapperPlayServerSystemChatMessage(event)
                 if (packet.isOverlay) return null
-                Message.TextMessage(packet.message)
+                Message.TextMessage(packet.message.historySafe())
             }
 
             else -> null
