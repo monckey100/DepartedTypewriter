@@ -3,6 +3,7 @@ package gg.departed.basic.entries.dialogue.messengers.option
 import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.Option
 import gg.departed.basic.entries.dialogue.OptionDialogueEntry
+import gg.departed.basic.entries.dialogue.OptionMarks
 import gg.departed.basic.entries.dialogue.TalkIndicator
 import com.typewritermc.engine.paper.entry.matches
 import com.typewritermc.core.interaction.InteractionBoundState
@@ -51,6 +52,7 @@ class BedrockOptionDialogueDialogueMessenger(player: Player, context: Interactio
 
     fun sendForm() {
         usableOptions = entry.options.filter { it.criteria.matches(player, context) }
+        val pickedOptions = OptionMarks.picked(player, entry, usableOptions)
         org.geysermc.floodgate.api.FloodgateApi.getInstance().sendForm(
             player.uniqueId,
             org.geysermc.cumulus.form.CustomForm.builder()
@@ -66,7 +68,14 @@ class BedrockOptionDialogueDialogueMessenger(player: Player, context: Interactio
                 )
                 .dropdown(
                     optionSelect.parsePlaceholders(player).legacy(),
-                    usableOptions.map { DepartedLang.tr(player, it.text.get(player)).parsePlaceholders(player).legacy() })
+                    usableOptions.map {
+                        OptionMarks.decorateBedrock(
+                            player,
+                            DepartedLang.tr(player, it.text.get(player)).parsePlaceholders(player),
+                            it in pickedOptions,
+                            OptionMarks.isOptional(entry, it),
+                        ).legacy()
+                    })
                 .label("\n\n\n\n")
                 .closedOrInvalidResultHandler { _, _ ->
                     when (player.boundState) {
@@ -77,6 +86,7 @@ class BedrockOptionDialogueDialogueMessenger(player: Player, context: Interactio
                 .validResultHandler { responds ->
                     val dropdown = responds.asDropdown()
                     selectedIndex = dropdown
+                    usableOptions.getOrNull(dropdown)?.let { OptionMarks.markPicked(player, entry, it) }
                     state = MessengerState.FINISHED
                 }
         )

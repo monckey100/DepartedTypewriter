@@ -6,6 +6,7 @@ import gg.departed.basic.entries.dialogue.NpcNodController
 import gg.departed.basic.entries.dialogue.Option
 import gg.departed.basic.entries.dialogue.OptionContextKeys
 import gg.departed.basic.entries.dialogue.OptionDialogueEntry
+import gg.departed.basic.entries.dialogue.OptionMarks
 import gg.departed.basic.entries.dialogue.TalkIndicator
 import com.typewritermc.engine.paper.entry.matches
 import com.typewritermc.core.interaction.InteractionContext
@@ -109,6 +110,11 @@ class JavaOptionDialogueDialogueMessenger(
     private val selected get() = usableOptions.getOrNull(selectedIndex)
 
     private var usableOptions: List<Option> = emptyList()
+        set(value) {
+            field = value
+            pickedOptions = OptionMarks.picked(player, entry, value)
+        }
+    private var pickedOptions: Set<Option> = emptySet()
     private var speakerDisplayName = ""
     private var parsedText = ""
     private var playTime = Duration.ZERO
@@ -265,7 +271,15 @@ class JavaOptionDialogueDialogueMessenger(
             val format = if (isSelected) selectedOption else unselectedOption
             lines += format.asMiniWithResolvers(
                 Placeholder.parsed("prefix", prefix),
-                Placeholder.parsed("option_text", DepartedLang.tr(player, option.text.get(player)).parsePlaceholders(player))
+                Placeholder.parsed(
+                    "option_text",
+                    OptionMarks.decorate(
+                        player,
+                        DepartedLang.tr(player, option.text.get(player)).parsePlaceholders(player),
+                        option in pickedOptions,
+                        OptionMarks.isOptional(entry, option),
+                    )
+                )
             )
         }
 
@@ -415,6 +429,8 @@ class JavaOptionDialogueDialogueMessenger(
         // stand down mid-dialogue (the deferred teardown fires because nothing reclaims it), and the
         // player, still in an active dialogue with no stand, would walk free. The mount is tied to the
         // messenger lifecycle instead: claimed in init(), released in dispose() when the node truly ends.
+        // Only a confirm on the finished animation actually picks the option.
+        if (animationComplete) selected?.let { OptionMarks.markPicked(player, entry, it) }
         completeOrFinish()
     }
 

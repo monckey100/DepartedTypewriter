@@ -79,7 +79,9 @@ data class Option(
     @Help("The modifiers to apply when this option is chosen.")
     val modifiers: List<Modifier> = emptyList(),
     @Help("The triggers to fire when this option is chosen.")
-    val triggers: List<Ref<TriggerableEntry>> = emptyList()
+    val triggers: List<Ref<TriggerableEntry>> = emptyList(),
+    @Help("Tag the option with (Optional). AUTO tags it when it only leads back to this same choice.")
+    val optional: OptionalTag = OptionalTag.AUTO,
 ) {
     val eventTriggers: List<EventTrigger> get() = triggers.map(::EntryTrigger)
 }
