@@ -6,6 +6,7 @@ import com.github.retrooper.packetevents.protocol.player.DiggingAction
 import com.github.retrooper.packetevents.protocol.player.EquipmentSlot.*
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPlayerDigging
 import com.google.gson.Gson
+import com.typewritermc.basic.itemcore.ItemCoreBridge
 import com.typewritermc.core.books.pages.Colors
 import com.typewritermc.core.entries.Ref
 import com.typewritermc.core.entries.emptyRef
@@ -429,6 +430,16 @@ class EntityCinematicRecording(
             player.damage(0.0)
         }
 
+        applyEquipment(value)
+    }
+
+    /**
+     * Puts the frame's recorded stacks into the editor's real hands and armor so a re-recording continues from
+     * them. Skipped while DepartedItemCore runs in custody mode: recorded stacks must never become real items
+     * (the core is the only inventory writer), so the editor records with what they actually wear.
+     */
+    private fun applyEquipment(value: EntityFrame) {
+        if (ItemCoreBridge.active) return
         value.mainHand?.let { player.inventory.setItemInMainHand(it) }
         value.offHand?.let { player.inventory.setItemInOffHand(it) }
         value.helmet?.let { player.inventory.setHelmet(it) }

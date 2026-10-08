@@ -2,6 +2,7 @@ repositories {}
 dependencies {
     compileOnly(project(":RoadNetworkExtension"))
     compileOnly(project(":QuestExtension"))
+    compileOnly(project(":BasicExtension"))
 }
 
 typewriter {
@@ -25,6 +26,7 @@ typewriter {
         dependencies {
             dependency("typewritermc", "RoadNetwork")
             dependency("typewritermc", "Quest")
+            dependency("typewritermc", "Basic")
         }
 
         paper()
