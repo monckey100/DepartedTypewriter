@@ -1,9 +1,5 @@
 package gg.departed.basic.entries.zone
 
-import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes
-import com.github.retrooper.packetevents.util.Vector3d
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerCollectItem
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity
 import com.typewritermc.core.books.pages.Colors
 import com.typewritermc.core.entries.Ref
 import com.typewritermc.core.extension.annotations.Entry
@@ -19,19 +15,18 @@ import com.typewritermc.engine.paper.entry.entries.AudienceEntry
 import com.typewritermc.engine.paper.entry.entries.ConstVar
 import com.typewritermc.engine.paper.entry.entries.Var
 import com.typewritermc.engine.paper.entry.triggerFor
-import com.typewritermc.engine.paper.extensions.packetevents.sendPacketTo
 import com.typewritermc.engine.paper.interaction.interactionContext
 import com.typewritermc.engine.paper.plugin
 import com.typewritermc.engine.paper.utils.Sound
 import com.typewritermc.engine.paper.utils.item.Item
 import com.typewritermc.engine.paper.utils.playSound
-import com.typewritermc.engine.paper.utils.toPacketLocation
+import com.typewritermc.engine.paper.utils.toBukkitLocation
 import com.typewritermc.engine.paper.utils.toPosition
-import io.github.retrooper.packetevents.util.SpigotConversionUtil
-import me.tofaa.entitylib.EntityLib
-import me.tofaa.entitylib.meta.EntityMeta
-import me.tofaa.entitylib.meta.projectile.ItemEntityMeta
-import me.tofaa.entitylib.wrapper.WrapperEntity
+import dev.departed.itemcore.api.ItemCore
+import dev.departed.itemcore.api.drops.Audience
+import dev.departed.itemcore.api.drops.DropOrigin
+import dev.departed.itemcore.api.drops.DropSpec
+import dev.departed.itemcore.api.item.Intake
 import org.bukkit.Bukkit
 import org.bukkit.Material
 import org.bukkit.entity.Player
@@ -40,6 +35,7 @@ import org.bukkit.event.EventPriority
 import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.scheduler.BukkitTask
+import org.bukkit.util.Vector
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
@@ -55,6 +51,8 @@ import kotlin.math.max
  * ## How could this be used?
  * A level 1 human talks to a chicken NPC and must axe mushroom blocks for resources. The mushrooms
  * persist for other players, and every player collects their own private loot.
+ *
+ * The loot is a DepartedItemCore ground item visible only to the harvesting player (hard dependency on the core).
  */
 class ResourceNodeZoneAudienceEntry(
     override val id: String = "",
@@ -146,43 +144,35 @@ class ResourceNodeZoneDisplay(
         pending[blockPosition] = restore
     }
 
-    /** Spawns a fake dropped item only the harvesting player can see, then collects it into their inventory. */
+    /**
+     * Drops the loot as a DepartedItemCore ground item that only the harvesting player sees and can pick up; the
+     * pickup goes through the core (inventory, overflow backpack) and counts for collect objectives.
+     */
     private fun giveHarvestLoot(player: Player, blockPosition: Position, stack: ItemStack) {
         if (stack.type == Material.AIR || stack.amount <= 0) return
-
-        val type = EntityTypes.ITEM
-        val uuid = EntityLib.getPlatform().entityUuidProvider.provide(type)
-        val entityId = EntityLib.getPlatform().entityIdProvider.provide(uuid, type)
-        val meta = EntityMeta.createMeta(entityId, type)
-        (meta as? ItemEntityMeta)?.item = SpigotConversionUtil.fromBukkitItemStack(stack)
-        val entity = WrapperEntity(entityId, uuid, type, meta)
-
-        entity.spawn(blockPosition.center().toPacketLocation())
-        entity.addViewer(player.uniqueId)
-        WrapperPlayServerEntityVelocity(entityId, Vector3d(0.0, 0.25, 0.0)) sendPacketTo player
-
-        Bukkit.getScheduler().runTaskLater(plugin, Runnable {
-            if (player.isOnline) {
-                WrapperPlayServerCollectItem(entityId, player.entityId, stack.amount) sendPacketTo player
+        val source = "typewriter:resource_node/${entry.id}"
+        val core = ItemCore.get()
+        val canonical = when (val outcome = core.intake().canonicalize(stack)) {
+            is Intake.Outcome.Canonical -> outcome.stack()
+            else -> {
+                plugin.logger.warning("[itemcore] $source: ${stack.type} is not a catalogued item ($outcome)")
+                return
             }
-            entity.despawn()
-            entity.remove()
-            if (player.isOnline) {
-                val leftover = player.inventory.addItem(stack)
-                leftover.values.forEach { player.dropPrivately(it) }
-            }
-        }, 10L)
+        }
+        val at = blockPosition.center().toBukkitLocation()
+        val spec = DropSpec.at(at)
+            .stack(canonical)
+            .audience(Audience.player(player.uniqueId))
+            .origin(DropOrigin.COLLECTIBLE, source)
+            .velocity(Vector(0.0, LOOT_POP_VELOCITY, 0.0))
+            .build()
+        core.drops().drop(spec).exceptionally { error ->
+            plugin.logger.warning("[itemcore] $source: drop for ${player.name} failed: ${error.message}")
+            null
+        }
     }
 
-    /**
-     * Drops [stack] as a real item that only [this] player can see or pick up, for loot that did not
-     * fit in their inventory. A plain world drop would be visible to, and collectable by, everyone.
-     */
-    private fun Player.dropPrivately(stack: ItemStack) {
-        val item = world.dropItemNaturally(location, stack) { spawned ->
-            spawned.isVisibleByDefault = false
-            spawned.owner = uniqueId
-        }
-        showEntity(plugin, item)
+    private companion object {
+        const val LOOT_POP_VELOCITY = 0.25
     }
 }

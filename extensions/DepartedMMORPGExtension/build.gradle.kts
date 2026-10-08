@@ -8,10 +8,12 @@ group = "gg.departed"
 version = "0.0.1"
 
 repositories {
-    //maven("https://nexus.phoenixdevt.fr/repository/maven-public/")
+    mavenLocal()
 }
 dependencies {
     implementation("com.mthaler:aparser:0.4.0")
+    // Hard: resource_node_zone loot is a DepartedItemCore ground item.
+    compileOnly("dev.departed:DepartedItemCore:0.1.0") { isTransitive = false }
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedNPC-1.0.0.jar"))
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedRPG.jar"))
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedLanguage-1.0.0.jar"))
@@ -32,6 +34,7 @@ typewriter {
         paper {
             dependency("DepartedNPC")
             dependency("DepartedRPG")
+            dependency("DepartedItemCore")
         }
     }
 }
