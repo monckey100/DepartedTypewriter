@@ -1,6 +1,10 @@
-repositories { }
+repositories {
+    mavenLocal()
+}
 dependencies {
     implementation("com.mthaler:aparser:0.4.0")
+    // Soft: only touched while DepartedItemCore runs in custody mode (see itemcore/ItemCoreBridge.kt).
+    compileOnly("dev.departed:DepartedItemCore:0.1.0") { isTransitive = false }
 }
 
 typewriter {

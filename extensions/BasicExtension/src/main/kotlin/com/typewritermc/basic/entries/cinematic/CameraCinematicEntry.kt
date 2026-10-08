@@ -8,6 +8,10 @@ import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientPl
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerPositionAndLook
 import com.typewritermc.basic.entries.cinematic.DisplayCameraAction.Companion.BASE_INTERPOLATION
 import com.typewritermc.basic.entries.variables.PlayerPositionOverride
+import com.typewritermc.basic.itemcore.InventoryMask
+import com.typewritermc.basic.itemcore.ItemCoreBridge
+import com.typewritermc.basic.itemcore.MaskHide
+import com.typewritermc.basic.itemcore.blockWorldInteraction
 import com.typewritermc.core.books.pages.Colors
 import com.typewritermc.core.extension.annotations.*
 import com.typewritermc.core.interaction.*
@@ -146,6 +150,9 @@ class CameraCinematicAction(
     private var listener: Listener? = null
     private var boundStateSubscription: InteractionBoundStateOverrideSubscription? = null
 
+    // With DepartedItemCore the inventory is hidden by a core VIEW lease instead of Typewriter's packet rewrite.
+    private var inventoryMask: InventoryMask? = null
+
     // Exactly who we hid, so teardown can un-hide exactly those. Do NOT derive this from a
     // VISIBLE_PLAYERS/SHOWING_PLAYER snapshot: when a cinematic and a lock bound are both active
     // (every dialogue), whichever starts second snapshots a world where the first already hid
@@ -246,7 +253,11 @@ class CameraCinematicAction(
             // The actual inventory will be cleared.
             // To prevent this, we only fake clear the inventory when the player is not in creative mode.
             if (gameMode != GameMode.CREATIVE && !isFloodgate) {
-                fakeClearInventory()
+                if (!ItemCoreBridge.active) {
+                    fakeClearInventory()
+                } else if (inventoryMask == null) {
+                    inventoryMask = ItemCoreBridge.mask(this@setup, MaskHide.ALL)
+                }
             }
         }
 
@@ -296,7 +307,7 @@ class CameraCinematicAction(
         interceptor = this.interceptPackets {
             // If the player is a bedrock player, we don't want to modify the location.
             if (isFloodgate) return@interceptPackets
-            keepFakeInventory()
+            if (ItemCoreBridge.active) blockWorldInteraction() else keepFakeInventory()
             PacketType.Play.Server.PLAYER_POSITION_AND_LOOK { event ->
                 val packet = WrapperPlayServerPlayerPositionAndLook(event)
                 packet.y += 500
@@ -352,6 +363,8 @@ class CameraCinematicAction(
         interceptor?.cancel()
         interceptor = null
         originalState = null
+        inventoryMask?.release()
+        inventoryMask = null
 
         // End the interaction so the normal teardown lifecycle runs (now a no-op for state).
         interruptInteraction()
@@ -394,7 +407,11 @@ class CameraCinematicAction(
                 allowFlight = false
             }
 
-            if (gameMode != GameMode.CREATIVE && !isFloodgate) {
+            val mask = inventoryMask
+            inventoryMask = null
+            if (mask != null) {
+                mask.release()
+            } else if (gameMode != GameMode.CREATIVE && !isFloodgate && !ItemCoreBridge.active) {
                 restoreInventory()
             }
         }

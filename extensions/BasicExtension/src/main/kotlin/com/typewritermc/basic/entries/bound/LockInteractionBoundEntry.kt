@@ -1,5 +1,9 @@
 package com.typewritermc.basic.entries.bound
 
+import com.typewritermc.basic.itemcore.InventoryMask
+import com.typewritermc.basic.itemcore.ItemCoreBridge
+import com.typewritermc.basic.itemcore.MaskHide
+import com.typewritermc.basic.itemcore.blockWorldInteraction
 import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes
 import com.github.retrooper.packetevents.protocol.packettype.PacketType.Play
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientInteractEntity
@@ -98,6 +102,7 @@ class LockInteractionBound(
     private var playerState: PlayerState? = null
     private var previousPosition: Position = Position.ORIGIN
     private var interceptor: InterceptionBundle? = null
+    private var inventoryMask: InventoryMask? = null
 
     // Exactly who we hid, so dispose can un-hide exactly those. A VISIBLE_PLAYERS/SHOWING_PLAYER
     // snapshot cannot be trusted here: this bound is set up while the dialogue's camera cinematic has
@@ -120,7 +125,11 @@ class LockInteractionBound(
         player.isFlying = true
         // For bedrock players we don't need to fake the inventory as we already hide the hotbar and item.
         if (!player.isFloodgate) {
-            player.fakeClearInventory()
+            if (ItemCoreBridge.active) {
+                Dispatchers.Sync.switchContext { inventoryMask = ItemCoreBridge.mask(player, MaskHide.ALL) }
+            } else {
+                player.fakeClearInventory()
+            }
         }
 
         Dispatchers.Sync.switchContext {
@@ -171,7 +180,7 @@ class LockInteractionBound(
 
             // If the player is a bedrock player, we don't need to fake the inventory, as we can just hide it.
             if (player.isFloodgate) return@interceptPackets
-            keepFakeInventory()
+            if (ItemCoreBridge.active) blockWorldInteraction() else keepFakeInventory()
         }
 
         val startPosition = targetPosition.get(player)
@@ -188,7 +197,11 @@ class LockInteractionBound(
         interceptor = null
         handler?.dispose()
         handler = null
-        if (!player.isFloodgate) {
+        val mask = inventoryMask
+        inventoryMask = null
+        if (mask != null) {
+            Dispatchers.Sync.switchContext { mask.release() }
+        } else if (!player.isFloodgate && !ItemCoreBridge.active) {
             player.restoreInventory()
         }
         Dispatchers.Sync.switchContext {

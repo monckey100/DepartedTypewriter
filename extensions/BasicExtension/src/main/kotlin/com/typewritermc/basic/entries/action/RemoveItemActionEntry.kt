@@ -1,5 +1,6 @@
 package com.typewritermc.basic.entries.action
 
+import com.typewritermc.basic.itemcore.ItemCoreBridge
 import com.typewritermc.core.books.pages.Colors
 import com.typewritermc.core.entries.Ref
 import com.typewritermc.core.extension.annotations.ContextKeys
@@ -37,6 +38,10 @@ import kotlin.reflect.KClass
  *
  * This can be used when `giving` an NPC an item, and you want to remove the item from the player's inventory.
  * Or when you want to remove a key from the player's inventory after they use it to unlock a door.
+ *
+ * With DepartedItemCore in custody mode the take is one all-or-nothing core plan over the hotbar and bag (never
+ * equipment, armor or the offhand): with an amount component exactly that many are taken or none; without one,
+ * every matching unit is taken.
  */
 class RemoveItemActionEntry(
     override val id: String = "",
@@ -49,6 +54,10 @@ class RemoveItemActionEntry(
     override fun ActionTrigger.execute() {
         Dispatchers.Sync.launch {
             val item = item.get(player, context)
+            if (ItemCoreBridge.active) {
+                removeThroughCore(item)
+                return@launch
+            }
             var removedAmount = 0
             var remainingAmount = 0
 
@@ -100,6 +109,18 @@ class RemoveItemActionEntry(
             context[RemoveItemContextKeys.REMOVED_AMOUNT] = removedAmount
             context[RemoveItemContextKeys.REMAINING_AMOUNT] = remainingAmount
         }
+    }
+
+    private fun ActionTrigger.removeThroughCore(item: Item) {
+        val requested = when (item) {
+            is SerializedItem -> item.build(player, context).amount
+            is CustomItem -> item.components<ItemAmountComponent>()
+                .takeIf { it.isNotEmpty() }
+                ?.sumOf { it.amount.get(player, context) }
+        } ?: ItemCoreBridge.available(player, item, context)
+        val removed = ItemCoreBridge.consume(player, item, context, requested, "quest:typewriter/remove_item/$id")
+        context[RemoveItemContextKeys.REMOVED_AMOUNT] = removed
+        context[RemoveItemContextKeys.REMAINING_AMOUNT] = requested - removed
     }
 }
 
