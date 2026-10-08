@@ -10,10 +10,6 @@ import com.typewritermc.engine.paper.entry.triggerFor
 import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
 import com.typewritermc.engine.paper.interaction.interactionContext
 import com.typewritermc.engine.paper.snippets.snippet
-import com.typewritermc.engine.paper.utils.item.CustomItem
-import com.typewritermc.engine.paper.utils.item.Item
-import com.typewritermc.engine.paper.utils.item.SerializedItem
-import com.typewritermc.engine.paper.utils.item.components.ItemAmountComponent
 import com.typewritermc.engine.paper.utils.server
 import org.bukkit.entity.Player
 import java.util.UUID
@@ -32,7 +28,7 @@ class DepartedObjectiveManager : Initializable {
     private val progress = ConcurrentHashMap<UUID, ConcurrentHashMap<String, ObjectiveProgress>>()
 
     override suspend fun initialize() {
-        server.onlinePlayers.forEach(::refreshCollectObjectives)
+        server.onlinePlayers.forEach(::restoreCollectObjectives)
     }
 
     override suspend fun shutdown() {
@@ -142,13 +138,14 @@ class DepartedObjectiveManager : Initializable {
         return objectiveLines(player).size
     }
 
-    fun refreshCollectObjectives(player: Player) {
-        Query.find<CollectItemObjectiveEntry>().forEach { objective ->
-            val count = objective.countCollectItems(player)
-            if (objective.progressVariable.isNotBlank() || count > progress(player, objective)) {
-                setProgress(player, objective, count)
+    /** Re-reads every gathered count from quest data (after a join or a restart; progress lives in RAM). */
+    fun restoreCollectObjectives(player: Player) {
+        Query.find<CollectItemObjectiveEntry>()
+            .filter { isTracking(player, it) }
+            .forEach { objective ->
+                val stored = objective.storedProgress(player)
+                if (stored > progress(player, objective)) setProgress(player, objective, stored)
             }
-        }
     }
 
     private fun syncQuestVariable(
@@ -218,48 +215,6 @@ data class ObjectiveProgress(
 fun Player.contextOrEmpty(): InteractionContext = runCatching {
     interactionContext
 }.getOrNull() ?: context()
-
-fun countInventory(player: Player, item: Item): Int {
-    return player.inventory.contents.filterNotNull().filter { item.isSameAs(player, it) }.sumOf { it.amount }
-}
-
-fun removeItems(player: Player, item: Item, amount: Int): Int {
-    if (amount <= 0) return 0
-    return when (item) {
-        is SerializedItem -> {
-            val itemStack = item.build(player).clone().apply { this.amount = amount }
-            val remaining = player.inventory.removeItemAnySlot(itemStack).values.sumOf { it.amount }
-            amount - remaining
-        }
-
-        is CustomItem -> removeCustomItems(player, item, amount)
-    }
-}
-
-private fun removeCustomItems(player: Player, item: CustomItem, amount: Int): Int {
-    val requested = item.components<ItemAmountComponent>().sumOf { it.amount.get(player) }.takeIf { it > 0 } ?: amount
-    var amountLeft = min(amount, requested)
-    val totalToRemove = amountLeft
-    val content = player.inventory.contents
-
-    for (slot in content.indices) {
-        val slotItem = content[slot] ?: continue
-        if (!item.isSameAs(player, slotItem)) continue
-
-        val slotAmount = slotItem.amount
-        if (slotAmount <= amountLeft) {
-            player.inventory.clear(slot)
-            amountLeft -= slotAmount
-        } else {
-            slotItem.amount = slotAmount - amountLeft
-            player.inventory.setItem(slot, slotItem)
-            amountLeft = 0
-        }
-
-        if (amountLeft == 0) break
-    }
-    return totalToRemove - amountLeft
-}
 
 private data class ObjectiveChunk(
     val raw: String,

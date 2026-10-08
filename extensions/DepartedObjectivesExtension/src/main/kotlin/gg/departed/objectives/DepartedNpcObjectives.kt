@@ -1,5 +1,6 @@
 package gg.departed.objectives
 
+import com.typewritermc.basic.itemcore.ItemCoreBridge
 import com.typewritermc.core.books.pages.Colors
 import com.typewritermc.core.entries.Query
 import com.typewritermc.core.entries.Ref
@@ -62,6 +63,10 @@ fun onTalkToDepartedNpcObjective(event: DepartedNpcInteractEvent, query: Query<T
 }
 
 @Entry("deliver_item_to_departednpc_objective", "Deliver items to a DepartedNPC NPC", Colors.YELLOW, "fa6-solid:hand-holding")
+/**
+ * Clicking the NPC hands over matching items from the hotbar and bag in one all-or-nothing DepartedItemCore take
+ * (as many as are still needed and held); the objective advances by what was taken.
+ */
 class DeliverItemToDepartedNpcObjectiveEntry(
     override val id: String = "",
     override val name: String = "",
@@ -84,10 +89,13 @@ fun onDeliverItemToDepartedNpcObjective(event: DepartedNpcInteractEvent, query: 
     query.findWhere { it.interactionType.matches(event.isLeftClick) && matchesDepartedNpcId(event.npcId, it.npcIdentifier) }
         .filter { manager.isTracking(event.player, it) }
         .forEach { objective ->
-            val item = objective.item.get(event.player)
-            val remaining = objective.targetAmount(event.player) - manager.progress(event.player, objective)
-            val available = countInventory(event.player, item)
-            val delivered = removeItems(event.player, item, minOf(remaining, available))
+            val player = event.player
+            val context = player.contextOrEmpty()
+            val item = objective.item.get(player, context)
+            val remaining = objective.targetAmount(player, context) - manager.progress(player, objective)
+            val handOver = minOf(remaining, ItemCoreBridge.available(player, item, context))
+            val source = "quest:typewriter/deliver/${objective.id}"
+            val delivered = ItemCoreBridge.consume(player, item, context, handOver, source)
             if (delivered > 0) {
                 manager.increment(event.player, objective, delivered)
             }

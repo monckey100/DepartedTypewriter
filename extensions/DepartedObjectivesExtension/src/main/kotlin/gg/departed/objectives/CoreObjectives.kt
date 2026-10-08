@@ -1,5 +1,6 @@
 package gg.departed.objectives
 
+import com.typewritermc.basic.itemcore.CoreItemQueries
 import com.typewritermc.core.books.pages.Colors
 import com.typewritermc.core.entries.Query
 import com.typewritermc.core.entries.Ref
@@ -26,11 +27,8 @@ import org.bukkit.entity.Player
 import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.block.BlockPlaceEvent
 import org.bukkit.event.entity.EntityDeathEvent
-import org.bukkit.event.entity.EntityPickupItemEvent
 import org.bukkit.event.inventory.CraftItemEvent
 import org.bukkit.event.inventory.FurnaceExtractEvent
-import org.bukkit.event.inventory.InventoryClickEvent
-import org.bukkit.event.inventory.InventoryDragEvent
 import org.bukkit.event.player.PlayerChangedWorldEvent
 import org.bukkit.event.player.PlayerFishEvent
 import org.bukkit.event.player.PlayerItemConsumeEvent
@@ -38,6 +36,10 @@ import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerTeleportEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.scheduler.BukkitTask
+import dev.departed.itemcore.api.ItemCore
+import dev.departed.itemcore.api.drops.DropOrigin
+import dev.departed.itemcore.api.event.ItemPickupEvent
+import dev.departed.itemcore.api.item.ItemView
 import org.koin.java.KoinJavaComponent.get
 import java.util.Optional
 
@@ -255,6 +257,13 @@ fun onSmeltItemObjective(event: FurnaceExtractEvent, query: Query<SmeltItemObjec
 }
 
 @Entry("collect_item_objective", "Collect items", Colors.YELLOW, "fa6-solid:bag-shopping")
+/**
+ * Counts items the player gathers from the world: every DepartedItemCore pickup (block, mob, farm and collectible
+ * drops, ore magnets, resource nodes) of a matching item adds the picked-up amount. Items bought, given by quests
+ * or commands, or dropped by a player and picked up again never count (the owner's rule: objectives count events,
+ * never possession). Progress is stored in the quest's data under [progressVariable] (or `obj_<entry id>`), so it
+ * survives restarts and is wiped when the quest is started again.
+ */
 class CollectItemObjectiveEntry(
     override val id: String = "",
     override val name: String = "",
@@ -270,43 +279,45 @@ class CollectItemObjectiveEntry(
     val anyOfMaterials: List<Material> = emptyList(),
 ) : DepartedObjectiveEntry, QuestVariableObjectiveEntry
 
-fun CollectItemObjectiveEntry.matchesCollectItem(player: Player, stack: ItemStack): Boolean =
-    if (anyOfMaterials.isNotEmpty()) stack.type in anyOfMaterials
-    else item.get(player).isSameAs(player, stack)
+fun CollectItemObjectiveEntry.matchesCollectItem(player: Player, view: ItemView): Boolean =
+    if (anyOfMaterials.isNotEmpty()) view.material() in anyOfMaterials
+    else CoreItemQueries.of(player, item.get(player), player.contextOrEmpty()).test(view)
 
-fun CollectItemObjectiveEntry.countCollectItems(player: Player): Int =
-    player.inventory.contents.filterNotNull().filter { matchesCollectItem(player, it) }.sumOf { it.amount }
+/** The quest-data key holding this objective's gathered count. */
+val CollectItemObjectiveEntry.dataKey: String
+    get() = progressVariable.trim().ifBlank { "obj_$id" }
 
-@EntryListener(CollectItemObjectiveEntry::class, ignoreCancelled = true)
-fun onCollectItemPickup(event: EntityPickupItemEvent, query: Query<CollectItemObjectiveEntry>) {
-    val player = event.entity as? Player ?: return
+fun CollectItemObjectiveEntry.storedProgress(player: Player): Int =
+    DepartedRpgBridge.cachedQuestDataValue(player, questId, dataKey).trim().toIntOrNull() ?: 0
+
+@EntryListener(CollectItemObjectiveEntry::class)
+fun onCollectItemPickup(event: ItemPickupEvent, query: Query<CollectItemObjectiveEntry>) {
+    if (event.phase() != ItemPickupEvent.Phase.POST || event.consumed()) return
+    if (event.origin() == DropOrigin.PLAYER_DROP) return
+    val gathered = event.taken()
+    if (gathered <= 0) return
+    val player = event.player
+    val view = ItemCore.get().items().view(event.stack())
     val manager = objectives()
-    query.findWhere { it.matchesCollectItem(player, event.item.itemStack) }.forEach { objective ->
-        val projectedAmount = objective.countCollectItems(player) + event.item.itemStack.amount
-        manager.setProgress(player, objective, projectedAmount)
-    }
+    query.findWhere { it.matchesCollectItem(player, view) }
+        .filter { manager.isTracking(player, it) && !manager.isComplete(player, it) }
+        .forEach { objective ->
+            val total = objective.storedProgress(player) + gathered
+            DepartedRpgBridge.setQuestDataValue(player, objective.questId, objective.dataKey, total.toString())
+            manager.setProgress(player, objective, total)
+        }
 }
 
 @EntryListener(CollectItemObjectiveEntry::class)
 fun onCollectItemJoin(event: PlayerJoinEvent, query: Query<CollectItemObjectiveEntry>) {
-    objectives().refreshCollectObjectives(event.player)
+    val player = event.player
+    server.scheduler.runTaskLater(com.typewritermc.engine.paper.plugin, Runnable {
+        if (player.isOnline) objectives().restoreCollectObjectives(player)
+    }, COLLECT_RESTORE_DELAY_TICKS)
 }
 
-@EntryListener(CollectItemObjectiveEntry::class, ignoreCancelled = true)
-fun onCollectItemInventoryClick(event: InventoryClickEvent, query: Query<CollectItemObjectiveEntry>) {
-    val player = event.whoClicked as? Player ?: return
-    server.scheduler.runTask(com.typewritermc.engine.paper.plugin, Runnable {
-        objectives().refreshCollectObjectives(player)
-    })
-}
-
-@EntryListener(CollectItemObjectiveEntry::class, ignoreCancelled = true)
-fun onCollectItemInventoryDrag(event: InventoryDragEvent, query: Query<CollectItemObjectiveEntry>) {
-    val player = event.whoClicked as? Player ?: return
-    server.scheduler.runTask(com.typewritermc.engine.paper.plugin, Runnable {
-        objectives().refreshCollectObjectives(player)
-    })
-}
+/** Quest data is cached a moment after join; restoring earlier would read an empty row. */
+private const val COLLECT_RESTORE_DELAY_TICKS = 60L
 
 @Entry("consume_item_objective", "Consume items", Colors.YELLOW, "game-icons:eating")
 class ConsumeItemObjectiveEntry(
