@@ -1,5 +1,6 @@
 package gg.departed.basic.entries.dialogue.hud
 
+import com.ticxo.modelengine.api.animation.ModelState
 import com.ticxo.modelengine.api.model.ActiveModel
 import com.ticxo.modelengine.api.model.render.DisplayBone
 import com.ticxo.modelengine.core.animation.handler.PriorityHandler
@@ -41,7 +42,14 @@ internal class DialogueModelRenderer(model: ActiveModel, private val centerY: Fl
     }
 }
 
-/** Preview animation advances bone transforms while skipping global script and effect keyframes. */
+/**
+ * Preview animation advances bone transforms while skipping global script and effect keyframes.
+ * The default SPAWN state never plays: the portrait should just be there, not pop in on every line.
+ */
 internal class DialoguePortraitAnimationHandler(model: ActiveModel) : PriorityHandler(model) {
     override fun tickGlobal() = Unit
+
+    override fun playState(state: ModelState) {
+        if (state != ModelState.SPAWN) super.playState(state)
+    }
 }

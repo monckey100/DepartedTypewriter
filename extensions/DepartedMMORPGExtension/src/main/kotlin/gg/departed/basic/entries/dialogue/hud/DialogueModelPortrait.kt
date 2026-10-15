@@ -55,8 +55,10 @@ internal class DialogueModelPortrait(private val player: Player) {
             (abs(cos(0.10)) * hitbox.depth + abs(sin(0.10)) * hitbox.height)
         val projectedHeight = abs(cos(0.10)) * hitbox.height + abs(sin(0.10)) * hitbox.depth
         val extent = maxOf(projectedWidth, projectedHeight, hitbox.depth, 0.25)
-        val scale = 1.8 / extent
-        val centerY = (hitbox.height * scale * 0.5).toFloat()
+        val tuning = DialoguePortraitTuning.resolve(npcId)
+        val scale = 1.8 / extent * tuning.scale
+        // The shader maps 46 px per block into the 96 px box; offset-y is in box heights (+ up).
+        val centerY = (hitbox.height * scale * 0.5 - tuning.offsetY * BOX_BLOCKS).toFloat()
 
         DialoguePortraitLifecycle.register(this, player.uniqueId, ::dispose)
         owners.put(player.uniqueId, this)?.takeIf { it !== this }?.dispose()
@@ -175,6 +177,8 @@ internal class DialogueModelPortrait(private val player: Player) {
     private companion object {
         /** Fixed yaw in departed_dialogue_model_vsh.glsl's projection. */
         const val SHADER_YAW = -0.23
+        /** Portrait box height in blocks (96 px at 46 px per block, departed_dialogue_model_vsh.glsl). */
+        const val BOX_BLOCKS = 96.0 / 46.0
         val owners = ConcurrentHashMap<UUID, DialogueModelPortrait>()
     }
 }
