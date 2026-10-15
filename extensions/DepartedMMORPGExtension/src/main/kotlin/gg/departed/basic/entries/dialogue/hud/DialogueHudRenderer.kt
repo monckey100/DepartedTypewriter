@@ -2,6 +2,7 @@ package gg.departed.basic.entries.dialogue.hud
 
 import net.kyori.adventure.key.Key
 import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.JoinConfiguration
 import net.kyori.adventure.text.format.NamedTextColor
 import net.kyori.adventure.text.format.ShadowColor
 import net.kyori.adventure.text.format.Style
@@ -45,12 +46,12 @@ object DialogueHudRenderer {
         responseHeader: Component = Component.text("YOUR RESPONSE", NamedTextColor.GOLD),
         completedBodyMillis: Long = 0L,
     ): Component {
-        val output = Component.text()
+        val output = mutableListOf<Component>()
         val capacity = minOf(4, choices.size)
-        output.append(panel(if (capacity == 0) 0xE005 else 0xE00F + capacity, -210, 226))
-        output.append(panel(0xE020, -86, 203))
+        output.add(panel(if (capacity == 0) 0xE005 else 0xE00F + capacity, -210, 226))
+        output.add(panel(0xE020, -86, 203))
         val name = fitOneLine(speaker, BODY_WIDTH)
-        output.append(row(0, name, -86 + (BODY_WIDTH - name.width) / 2, NamedTextColor.GOLD))
+        output.add(row(0, name, -86 + (BODY_WIDTH - name.width) / 2, NamedTextColor.GOLD))
 
         val bodyGlyphs = layout.glyphs(body)
         val bodyLines = layout.wrap(bodyGlyphs, BODY_WIDTH)
@@ -60,7 +61,7 @@ object DialogueHudRenderer {
             HudBodyPage(bodyPages[page], page, bodyPages.size)
         } else layout.bodyPage(bodyLines, revealedCharacters)
         bodyPage.lines.forEachIndexed { index, line ->
-            output.append(row(index + 1, HudLine(line.glyphs.filter { it.sourceIndex < revealedCharacters }),
+            output.add(row(index + 1, HudLine(line.glyphs.filter { it.sourceIndex < revealedCharacters }),
                 -86, parchmentInk, parchment = true))
         }
 
@@ -69,13 +70,13 @@ object DialogueHudRenderer {
         if (visible.isNotEmpty()) {
             val selectedPosition = choices.indexOfFirst { it.index == selectedIndex }.coerceAtLeast(0)
             val range = if (choices.size > visible.size) "  ${selectedPosition + 1}/${choices.size}" else ""
-            output.append(row(5, fitOneLine(responseHeader.append(Component.text(range, NamedTextColor.GOLD)),
+            output.add(row(5, fitOneLine(responseHeader.append(Component.text(range, NamedTextColor.GOLD)),
                 FOOTER_WIDTH), -190, NamedTextColor.GOLD))
             visible.forEachIndexed { slot, choice ->
                 val selected = choice.index == selectedIndex
                 if (selected) {
-                    output.append(panel(0xE001 + slot, -190, 226))
-                    output.append(row(6 + slot * 2, fitOneLine(Component.text(">", NamedTextColor.GOLD), 12), -190))
+                    output.add(panel(0xE001 + slot, -190, 226))
+                    output.add(row(6 + slot * 2, fitOneLine(Component.text(">", NamedTextColor.GOLD), 12), -190))
                 }
                 val optionLines = layout.wrap(choice.label, OPTION_WIDTH)
                 val pageCount = (optionLines.size + 1) / 2
@@ -85,7 +86,7 @@ object DialogueHudRenderer {
                 val lines = optionLines.drop(pageIndex * 2).take(2).toMutableList()
                 if (!selected && optionLines.size > 2) lines[1] = layout.ellipsize(lines[1], OPTION_WIDTH)
                 if (selected && pageCount > 1) optionPageHint = "response ${pageIndex + 1}/$pageCount"
-                lines.forEachIndexed { index, line -> output.append(row(6 + slot * 2 + index, line, -176)) }
+                lines.forEachIndexed { index, line -> output.add(row(6 + slot * 2 + index, line, -176)) }
             }
         }
 
@@ -93,13 +94,11 @@ object DialogueHudRenderer {
             if (bodyPage.count > 1) add("text ${bodyPage.index + 1}/${bodyPage.count}")
             optionPageHint?.let { add(it) }
         }
-        val completeHint = if (pageHints.isEmpty()) hint else Component.text()
-            .append(hint)
-            .append(Component.text("  •  ${pageHints.joinToString("  •  ")}", NamedTextColor.GRAY))
-            .build()
+        val completeHint = if (pageHints.isEmpty()) hint else children(listOf(hint,
+            Component.text("  •  ${pageHints.joinToString("  •  ")}", NamedTextColor.GRAY)))
         val footer = fitOneLine(completeHint, FOOTER_WIDTH)
-        output.append(row(15 + capacity, footer, -190 + (FOOTER_WIDTH - footer.width) / 2))
-        return output.build()
+        output.add(row(15 + capacity, footer, -190 + (FOOTER_WIDTH - footer.width) / 2))
+        return children(output)
     }
 
     internal fun visibleChoices(choices: List<HudChoice>, selectedIndex: Int, count: Int): List<HudChoice> {
@@ -122,12 +121,12 @@ object DialogueHudRenderer {
         defaultColor: TextColor = NamedTextColor.WHITE,
         parchment: Boolean = false,
     ): Component {
-        val output = Component.text().append(spacing(x))
+        val output = mutableListOf(spacing(x))
         var runStyle: Style? = null
         val run = StringBuilder()
         fun flush() {
             if (run.isEmpty()) return
-            output.append(Component.text(run.toString()).style(runStyle!!))
+            output.add(Component.text(run.toString()).style(runStyle!!))
             run.setLength(0)
         }
         line.glyphs.forEach { glyph ->
@@ -150,15 +149,19 @@ object DialogueHudRenderer {
             run.appendCodePoint(glyph.codePoint)
         }
         flush()
-        return output.append(spacing(-x - line.width)).build()
+        output.add(spacing(-x - line.width))
+        return children(output)
     }
 
-    private fun panel(glyph: Int, x: Int, advance: Int): Component = Component.text()
-        .append(spacing(x))
-        .append(Component.text(String(Character.toChars(glyph))).font(panelFont)
-            .color(NamedTextColor.WHITE).shadowColor(ShadowColor.none()))
-        .append(spacing(-x - advance))
-        .build()
+    private fun panel(glyph: Int, x: Int, advance: Int): Component = children(listOf(
+        spacing(x),
+        Component.text(String(Character.toChars(glyph))).font(panelFont)
+            .color(NamedTextColor.WHITE).shadowColor(ShadowColor.none()),
+        spacing(-x - advance),
+    ))
+
+    /** Adventure 5's TextComponent.Builder.build() descriptor does not exist on the server's 4.x; join instead. */
+    private fun children(parts: List<Component>): Component = Component.join(JoinConfiguration.noSeparators(), parts)
 
     private fun spacing(pixels: Int): Component {
         var remaining = kotlin.math.abs(pixels)
