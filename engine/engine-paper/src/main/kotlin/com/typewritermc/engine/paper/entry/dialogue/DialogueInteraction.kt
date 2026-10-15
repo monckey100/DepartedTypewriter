@@ -23,6 +23,7 @@ import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import org.koin.java.KoinJavaComponent
 import java.time.Duration
+import java.util.UUID
 
 class DialogueInteraction(
     private val player: Player,
@@ -34,10 +35,15 @@ class DialogueInteraction(
 
     private val factDatabase: FactDatabase by inject()
 
+    private val sessionId = UUID.randomUUID()
+    private val sessionIdentity = InteractionContext(mapOf(DialogueSessionId to sessionId))
+    private val sessionContext = initialInteractionContext.combine(sessionIdentity)
+    private var capturesChat = false
+
     internal var currentEntry: DialogueEntry = initialEntry
-    private var currentMessenger = initialEntry.messenger(player, initialInteractionContext) ?: EmptyDialogueMessenger(
+    private var currentMessenger = initialEntry.messenger(player, sessionContext) ?: EmptyDialogueMessenger(
         player,
-        initialInteractionContext,
+        sessionContext,
         initialEntry
     )
     private var playTime = Duration.ZERO
@@ -70,10 +76,18 @@ class DialogueInteraction(
     private fun setup() {
         isActive = true
         playTime = Duration.ZERO
+        if (capturesChat && !currentMessenger.capturesChat) {
+            player.stopBlockingMessages()
+            player.chatHistory.resendMessages(player)
+            capturesChat = false
+        }
         currentMessenger.init()
         _speakers.add(currentEntry.speaker)
         player.playSpeakerSound(currentEntry.speaker.get())
-        player.startBlockingMessages()
+        if (currentMessenger.capturesChat) {
+            player.startBlockingMessages()
+            capturesChat = true
+        }
         player.startBlockingActionBar()
     }
 
@@ -100,7 +114,7 @@ class DialogueInteraction(
     fun next(nextEntry: DialogueEntry, context: InteractionContext) {
         cleanupEntry(false)
         currentEntry = nextEntry
-        val nextContext = currentMessenger.context.combine(context)
+        val nextContext = currentMessenger.context.combine(context).combine(sessionIdentity)
         currentMessenger =
             nextEntry.messenger(player, nextContext) ?: EmptyDialogueMessenger(player, nextContext, nextEntry)
         setup()
@@ -113,9 +127,10 @@ class DialogueInteraction(
         val messenger = currentMessenger
 
         if (final) {
-            player.stopBlockingMessages()
+            if (capturesChat) player.stopBlockingMessages()
             player.stopBlockingActionBar()
             messenger.end()
+            capturesChat = false
         }
         messenger.dispose()
 

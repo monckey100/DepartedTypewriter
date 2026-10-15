@@ -8,6 +8,13 @@ import gg.departed.basic.entries.dialogue.OptionContextKeys
 import gg.departed.basic.entries.dialogue.OptionDialogueEntry
 import gg.departed.basic.entries.dialogue.OptionMarks
 import gg.departed.basic.entries.dialogue.TalkIndicator
+import gg.departed.basic.entries.dialogue.useDialogueHud
+import gg.departed.basic.entries.dialogue.hud.DialogueHudRenderer
+import gg.departed.basic.entries.dialogue.hud.DialogueNpcPortrait
+import gg.departed.basic.entries.dialogue.hud.HudChoice
+import gg.departed.basic.entries.dialogue.hud.clearDialogueHud
+import gg.departed.basic.entries.dialogue.hud.revealedHudCharacters
+import gg.departed.basic.entries.dialogue.hud.showDialogueHud
 import com.typewritermc.engine.paper.entry.matches
 import com.typewritermc.core.interaction.InteractionContext
 import com.typewritermc.core.utils.around
@@ -91,6 +98,9 @@ class JavaOptionDialogueDialogueMessenger(
     context: InteractionContext,
     entry: OptionDialogueEntry
 ) : DialogueMessenger<OptionDialogueEntry>(player, context, entry) {
+    private val hudEnabled = useDialogueHud(entry)
+    private val hudPortrait = if (hudEnabled) DialogueNpcPortrait(player) else null
+    override val capturesChat: Boolean get() = !hudEnabled
 
     // --- Core state ---
     private var confirmationKeyHandler: ConfirmationKeyHandler? = null
@@ -102,8 +112,10 @@ class JavaOptionDialogueDialogueMessenger(
     private val stopVoice = entry.stopvoice.get(player) // stop previous talking
     private val cutVoice = entry.cutvoice.get(player)
 
+    private var selectionChangedAt = Duration.ZERO
     private var selectedIndex = 0
         set(value) {
+            if (field != value) selectionChangedAt = playTime
             field = value
             this.context[entry, OptionContextKeys.SELECTED_OPTION] = value + 1 // 1-based in context
         }
@@ -120,6 +132,7 @@ class JavaOptionDialogueDialogueMessenger(
     private var playTime = Duration.ZERO
     private var totalDuration = Duration.ZERO
     private var completedAnimation = false
+    private var lastHudSentAt = Duration.ZERO
 
     override val eventTriggers: List<EventTrigger>
         get() = entry.eventTriggers + (selected?.eventTriggers ?: emptyList())
@@ -186,6 +199,7 @@ class JavaOptionDialogueDialogueMessenger(
         // Nod the speaking NPC's head while the line types out.
         runSync {
             nodNpcId = NpcNodController.resolveSpeakerId(entry.npcSpeaker, entry.speaker.get(), player)
+            hudPortrait?.show(nodNpcId)
             NpcNodController.start(nodNpcId, player, (totalDuration.toMillis() / 50L).toInt().coerceAtLeast(1))
         }
     }
@@ -196,6 +210,8 @@ class JavaOptionDialogueDialogueMessenger(
         val isFirst = playTime == Duration.ZERO
         playTime += context.deltaTime
         if (state != MessengerState.RUNNING) return
+
+        hudPortrait?.tick(playTime < typingDurationType.totalDuration(parsedText.stripped(), typeDuration))
 
         var forceSend = false
         val newOptions = entry.options.filter { it.criteria.matches(player, this.context) }
@@ -212,7 +228,9 @@ class JavaOptionDialogueDialogueMessenger(
             return
         }
 
-        if (playTime.toTicks() % 100 > 0 && completedAnimation && !isFirst && !forceSend) {
+        val refreshDue = if (hudEnabled) (playTime - lastHudSentAt).toMillis() >= 1_000L
+            else playTime.toTicks() % 100 == 0L
+        if (!refreshDue && completedAnimation && !isFirst && !forceSend) {
             // throttle message updates
             return
         }
@@ -226,6 +244,11 @@ class JavaOptionDialogueDialogueMessenger(
         val typePercentage =
             if (typeDuration.isZero) 1.0
             else typingDurationType.calculatePercentage(playTime, typeDuration, rawText)
+
+        if (hudEnabled) {
+            displayHud(playTime, rawText, typePercentage)
+            return
+        }
 
         val resultingLines = rawText.limitLineLength(optionMaxLineLength).lineCount
         val text = parsedText.asPartialFormattedMini(
@@ -243,6 +266,39 @@ class JavaOptionDialogueDialogueMessenger(
 
         val component = player.chatHistory.composeDarkMessage(message)
         player.sendMessage(component)
+    }
+
+    private fun displayHud(playTime: Duration, rawText: String, typePercentage: Double) {
+        val typingDuration = typingDurationType.totalDuration(rawText, typeDuration)
+        val timeAfterTyping = (playTime - typingDuration).toMillis().coerceAtLeast(0L)
+        val limit = if (delayOptionShow <= 0) 4 else (timeAfterTyping / delayOptionShow).toInt().coerceIn(0, 4)
+        completedAnimation = limit >= min(4, usableOptions.size)
+        val choices = usableOptions.mapIndexed { index, option ->
+            HudChoice(
+                OptionMarks.decorate(
+                    player,
+                    DepartedLang.tr(player, option.text.get(player)).parsePlaceholders(player),
+                    option in pickedOptions,
+                    OptionMarks.isOptional(entry, option),
+                ).asMini(),
+                index,
+            )
+        }
+        val body = parsedText.asMini()
+        player.showDialogueHud(DialogueHudRenderer.render(
+            speaker = speakerDisplayName.asMini(),
+            body = body,
+            revealedCharacters = revealedHudCharacters(body, typePercentage),
+            choices = choices,
+            selectedIndex = selectedIndex,
+            shownChoices = limit,
+            hint = "<gold>WASD / Scroll</gold><gray> choose  </gray><gold>Jump / Shift</gold><gray> select</gray>".asMini(),
+            elapsedMillis = (playTime - selectionChangedAt).toMillis(),
+            responseHeader = DepartedLang.tr(player, "Your response").asMini()
+                .colorIfAbsent(net.kyori.adventure.text.format.NamedTextColor.GOLD),
+            completedBodyMillis = timeAfterTyping,
+        ))
+        lastHudSentAt = playTime
     }
 
     private fun formatOptions(rawText: String): Component {
@@ -507,6 +563,8 @@ class JavaOptionDialogueDialogueMessenger(
 
     override fun dispose() {
         super.dispose()
+        if (hudEnabled) player.clearDialogueHud()
+        hudPortrait?.dispose()
         talkIndicator.dispose()
         confirmationKeyHandler?.dispose()
         confirmationKeyHandler = null

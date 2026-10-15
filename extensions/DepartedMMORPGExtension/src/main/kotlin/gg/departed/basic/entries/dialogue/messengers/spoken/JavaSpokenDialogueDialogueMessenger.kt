@@ -6,6 +6,12 @@ import gg.departed.basic.entries.dialogue.LastSpeakerTracker
 import gg.departed.basic.entries.dialogue.NpcNodController
 import gg.departed.basic.entries.dialogue.SpokenDialogueEntry
 import gg.departed.basic.entries.dialogue.TalkIndicator
+import gg.departed.basic.entries.dialogue.useDialogueHud
+import gg.departed.basic.entries.dialogue.hud.DialogueHudRenderer
+import gg.departed.basic.entries.dialogue.hud.DialogueNpcPortrait
+import gg.departed.basic.entries.dialogue.hud.clearDialogueHud
+import gg.departed.basic.entries.dialogue.hud.revealedHudCharacters
+import gg.departed.basic.entries.dialogue.hud.showDialogueHud
 import com.typewritermc.core.interaction.InteractionContext
 import org.bukkit.event.EventHandler
 import com.typewritermc.engine.paper.entry.dialogue.*
@@ -58,6 +64,9 @@ val spokenInstructionTicksBase: Long by snippet("dialogue.spoken.instruction.tic
 
 class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionContext, entry: SpokenDialogueEntry) :
     DialogueMessenger<SpokenDialogueEntry>(player, context, entry) {
+    private val hudEnabled = useDialogueHud(entry)
+    private val hudPortrait = if (hudEnabled) DialogueNpcPortrait(player) else null
+    override val capturesChat: Boolean get() = !hudEnabled
     private var confirmationKeyHandler: ConfirmationKeyHandler? = null
     private val talkIndicator = TalkIndicator(player, context, entry.talkIndicator)
 
@@ -65,6 +74,8 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
     private var text = ""
     private var typingDuration = Duration.ZERO
     private var playedTime = Duration.ZERO
+    private var lastHudReveal = -1
+    private var lastHudSentAt = Duration.ZERO
 
     // Whether to stop the current voice line when this dialogue is advanced/finished.
     private var stopVoiceOnAdvance = false
@@ -125,6 +136,7 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
             registerConfirmListener()
             // Nod the speaking NPC's head for roughly as long as the line takes to type out.
             nodNpcId = NpcNodController.resolveSpeakerId(entry.npcSpeaker, entry.speaker.get(), player)
+            hudPortrait?.show(nodNpcId)
             NpcNodController.start(nodNpcId, player, (typingDuration.toMillis() / 50L).toInt().coerceAtLeast(1))
             // Remember who is talking so out-of-band NPC speech (quest-busy line) can use them.
             LastSpeakerTracker.record(player.uniqueId, speakerDisplayName, voiceActor ?: "", nodNpcId)
@@ -203,7 +215,28 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
     override fun tick(context: TickContext) {
         talkIndicator.tick()
         if (state != MessengerState.RUNNING) return
+        val firstFrame = playedTime.isZero
         playedTime += context.deltaTime
+        hudPortrait?.tick(!animationComplete)
+        if (hudEnabled) {
+            val body = text.asMini()
+            val percentage = typingDurationType.calculatePercentage(playedTime, entry.duration.get(player), text.stripped())
+            val revealed = revealedHudCharacters(body, percentage)
+            if (animationComplete && !firstFrame && revealed == lastHudReveal &&
+                (playedTime - lastHudSentAt).toMillis() < 1_000L) return
+            val action = if (eventTriggers.isEmpty()) "finish" else "continue"
+            player.showDialogueHud(DialogueHudRenderer.render(
+                speaker = speakerDisplayName.asMini(),
+                body = body,
+                revealedCharacters = revealed,
+                hint = "<gold>Jump / Shift</gold><gray> to $action</gray>".asMini(),
+                elapsedMillis = playedTime.toMillis(),
+                completedBodyMillis = (playedTime - typingDuration).toMillis().coerceAtLeast(0L),
+            ))
+            lastHudReveal = revealed
+            lastHudSentAt = playedTime
+            return
+        }
         player.sendSpokenDialogue(
             text,
             speakerDisplayName,
@@ -215,6 +248,8 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
 
     override fun dispose() {
         super.dispose()
+        if (hudEnabled) player.clearDialogueHud()
+        hudPortrait?.dispose()
         talkIndicator.dispose()
         confirmationKeyHandler?.dispose()
         confirmationKeyHandler = null

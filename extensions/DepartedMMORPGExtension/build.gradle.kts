@@ -17,6 +17,11 @@ dependencies {
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedNPC-1.0.0.jar"))
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedRPG.jar"))
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedLanguage-1.0.0.jar"))
+    compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/ModelEngine-R4.1.0.jar"))
+    testImplementation(kotlin("test"))
+    testImplementation("org.junit.jupiter:junit-jupiter:5.12.2")
+    testImplementation("net.kyori:adventure-api:5.1.1")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
 typewriter {
@@ -35,9 +40,14 @@ typewriter {
             dependency("DepartedNPC")
             dependency("DepartedRPG")
             dependency("DepartedItemCore")
+            dependency("ModelEngine")
         }
     }
 }
 kotlin {
     jvmToolchain(21)
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

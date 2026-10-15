@@ -3,6 +3,13 @@ package gg.departed.basic.entries.dialogue.messengers.actionbar
 import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.ActionBarDialogueEntry
 import gg.departed.basic.entries.dialogue.TalkIndicator
+import gg.departed.basic.entries.dialogue.NpcNodController
+import gg.departed.basic.entries.dialogue.useDialogueHud
+import gg.departed.basic.entries.dialogue.hud.DialogueHudRenderer
+import gg.departed.basic.entries.dialogue.hud.DialogueNpcPortrait
+import gg.departed.basic.entries.dialogue.hud.clearDialogueHud
+import gg.departed.basic.entries.dialogue.hud.revealedHudCharacters
+import gg.departed.basic.entries.dialogue.hud.showDialogueHud
 import com.typewritermc.core.interaction.InteractionContext
 import com.typewritermc.engine.paper.entry.dialogue.*
 import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
@@ -30,6 +37,10 @@ class JavaActionBarDialogueDialogueMessenger(
 ) :
     DialogueMessenger<ActionBarDialogueEntry>(player, context, entry) {
 
+    private val hudEnabled = useDialogueHud(entry)
+    private val hudPortrait = if (hudEnabled) DialogueNpcPortrait(player) else null
+    override val capturesChat: Boolean get() = !hudEnabled
+
     private var confirmationKeyHandler: ConfirmationKeyHandler? = null
     private val talkIndicator = TalkIndicator(player, context, entry.talkIndicator)
 
@@ -37,6 +48,8 @@ class JavaActionBarDialogueDialogueMessenger(
     private var text = ""
     private var typingDuration = Duration.ZERO
     private var playTime = Duration.ZERO
+    private var lastHudReveal = -1
+    private var lastHudSentAt = Duration.ZERO
 
     override var animationComplete: Boolean
         get() = playTime >= typingDuration
@@ -85,7 +98,9 @@ class JavaActionBarDialogueDialogueMessenger(
 
 
         // The player might have had something before this. So we want to clean the chat before sending our message.
-        player.chatHistory.resendMessages(player)
+        if (hudEnabled) {
+            runSync { hudPortrait?.show(NpcNodController.resolveSpeakerId("", entry.speaker.get(), player)) }
+        } else player.chatHistory.resendMessages(player)
     }
 
     private fun pluginHost(): JavaPlugin {
@@ -105,6 +120,32 @@ class JavaActionBarDialogueDialogueMessenger(
 
         val rawText = text.stripped()
         val percentage = typingDurationType.calculatePercentage(playTime, entry.duration.get(player), rawText)
+
+        if (hudEnabled) {
+            hudPortrait?.tick(!animationComplete)
+            val body = text.asMini()
+            val revealed = revealedHudCharacters(body, percentage)
+            if (animationComplete && revealed == lastHudReveal &&
+                (playTime - lastHudSentAt).toMillis() < 1_000L) return
+            val key = when (confirmationKey) {
+                ConfirmationKey.JUMP -> "Jump"
+                ConfirmationKey.SNEAK -> "Shift"
+                ConfirmationKey.SWAP_HANDS -> "Swap hands"
+                ConfirmationKey.LEFT_CLICK -> "Left click"
+                ConfirmationKey.RIGHT_CLICK -> "Right click"
+            }
+            val action = if (eventTriggers.isEmpty()) "finish" else "continue"
+            player.showDialogueHud(DialogueHudRenderer.render(
+                speaker = speakerDisplayName.asMini(),
+                body = body,
+                revealedCharacters = revealed,
+                hint = "<gold>$key</gold><gray> to $action</gray>".asMini(),
+                completedBodyMillis = (playTime - typingDuration).toMillis().coerceAtLeast(0L),
+            ))
+            lastHudReveal = revealed
+            lastHudSentAt = playTime
+            return
+        }
 
         // After the message is finished typing, we don't need to send it as often anymore.
         if (percentage > 1.1 && playTime.toTicks() % 40 > 0) {
@@ -137,9 +178,12 @@ class JavaActionBarDialogueDialogueMessenger(
     override fun dispose() {
         super.dispose()
         talkIndicator.dispose()
-        val component = Component.empty()
-        player.acceptActionBarMessage(component)
-        player.sendActionBar(component)
+        hudPortrait?.dispose()
+        if (hudEnabled) player.clearDialogueHud() else {
+            val component = Component.empty()
+            player.acceptActionBarMessage(component)
+            player.sendActionBar(component)
+        }
         confirmationKeyHandler?.dispose()
         confirmationKeyHandler = null
     }

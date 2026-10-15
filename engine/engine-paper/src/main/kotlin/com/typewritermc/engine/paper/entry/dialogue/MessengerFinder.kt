@@ -29,6 +29,9 @@ open class DialogueMessenger<DE : DialogueEntry>(
 
     open var animationComplete = true
 
+    /** Whether this presentation replaces chat and needs its history restored on exit. */
+    open val capturesChat: Boolean get() = true
+
     open fun init() {
         plugin.registerEvents(this)
     }
@@ -41,7 +44,7 @@ open class DialogueMessenger<DE : DialogueEntry>(
 
     open fun end() {
         state = MessengerState.FINISHED
-        player.chatHistory.resendMessages(player)
+        if (capturesChat) player.chatHistory.resendMessages(player)
     }
 
     open val eventTriggers: List<EventTrigger>
