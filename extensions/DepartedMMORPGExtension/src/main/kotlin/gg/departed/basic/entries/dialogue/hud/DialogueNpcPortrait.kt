@@ -33,13 +33,27 @@ class DialogueNpcPortrait(private val player: Player) {
     private var worldId: UUID? = null
     @Volatile
     private var modelPortrait: DialogueModelPortrait? = null
+    private var facingStep = facingStep(DialogueFacing.RIGHT)
 
-    /** Resolve the existing NPC skin and show it. Call from the Bukkit main thread. */
-    fun show(npcId: String?): Boolean {
+    /** Null until [show] has run; then whether a portrait is visible (false = render the HUD without one). */
+    @Volatile
+    var shown: Boolean? = null
+        private set
+
+    /**
+     * Resolve the existing NPC skin and show it turned [facingDegrees] (see [DialogueFacing]).
+     * Call from the Bukkit main thread.
+     */
+    fun show(npcId: String?, facingDegrees: Double = DialogueFacing.RIGHT): Boolean {
         check(Bukkit.isPrimaryThread()) { "Dialogue portraits must be shown on the Bukkit main thread" }
+        return resolveAndShow(npcId, facingDegrees).also { shown = it }
+    }
+
+    private fun resolveAndShow(npcId: String?, facingDegrees: Double): Boolean {
         if (disposed || !player.isOnline || npcId.isNullOrBlank()) return false
         modelPortrait?.dispose()
         modelPortrait = null
+        facingStep = facingStep(facingDegrees)
         val profile = DialogueNpcProfile.resolve(player, npcId)
         if (profile != null) {
             backdrop = false
@@ -47,7 +61,7 @@ class DialogueNpcPortrait(private val player: Player) {
         }
         if (!Bukkit.getPluginManager().isPluginEnabled("ModelEngine")) return false
         val model = DialogueModelPortrait(player)
-        if (!model.show(npcId)) return false
+        if (!model.show(npcId, facingDegrees)) return false
         modelPortrait = model
         return showBackdrop()
     }
@@ -113,10 +127,11 @@ class DialogueNpcPortrait(private val player: Player) {
         pitch = 0f
     }
 
+    // Shader contract (departed_dialogue_portrait_*): state = pose (0..63) + 64 * facing step (0..16), 2047 = backdrop.
     private fun marker(): Float {
-        if (backdrop) return -278528f
+        if (backdrop) return -262144f - 256f * BACKDROP_STATE
         val phase = ((System.nanoTime() / 100_000_000L) % 16).toInt()
-        val state = phase + (if (talking) 16 else 0) + (if (slim) 32 else 0)
+        val state = phase + (if (talking) 16 else 0) + (if (slim) 32 else 0) + 64 * facingStep
         return -262144f - 256f * state
     }
 
@@ -167,6 +182,10 @@ class DialogueNpcPortrait(private val player: Player) {
     }
 
     private companion object {
+        const val BACKDROP_STATE = 2047
         val owners = ConcurrentHashMap<UUID, DialogueNpcPortrait>()
+
+        /** 11.25 degree steps; 8 looks at the viewer. */
+        fun facingStep(degrees: Double): Int = (8 + Math.round(degrees / 11.25).toInt()).coerceIn(0, 16)
     }
 }

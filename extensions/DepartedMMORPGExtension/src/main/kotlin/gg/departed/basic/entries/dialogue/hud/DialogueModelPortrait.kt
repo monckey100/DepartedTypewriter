@@ -35,9 +35,10 @@ internal class DialogueModelPortrait(private val player: Player) {
     private var updateTask: BukkitTask? = null
     private var worldId: UUID? = null
     private var elapsedTicks = 0L
+    private var yaw = 0f
 
     /** Resolve the existing blueprint and create a private preview. Call on the Bukkit main thread. */
-    fun show(npcId: String?): Boolean {
+    fun show(npcId: String?, facingDegrees: Double = DialogueFacing.RIGHT): Boolean {
         check(Bukkit.isPrimaryThread()) { "Dialogue model portraits must be shown on the Bukkit main thread" }
         if (disposed || !player.isOnline || npcId.isNullOrBlank()) return false
         if (!Bukkit.getPluginManager().isPluginEnabled("ModelEngine")) return false
@@ -47,7 +48,10 @@ internal class DialogueModelPortrait(private val player: Player) {
         val modelId = definition.modelId()?.takeIf(String::isNotBlank) ?: return false
         val blueprint = ModelEngineAPI.getBlueprint(modelId) ?: return false
         val hitbox = blueprint.mainHitbox
-        val projectedWidth = abs(cos(-0.23)) * hitbox.width + abs(sin(-0.23)) *
+        // The shader views the model turned SHADER_YAW; turning the dummy by -(facing + SHADER_YAW) nets out to facing.
+        val facing = Math.toRadians(facingDegrees)
+        yaw = Math.toDegrees(-facing - SHADER_YAW).toFloat()
+        val projectedWidth = abs(cos(facing)) * hitbox.width + abs(sin(facing)) *
             (abs(cos(0.10)) * hitbox.depth + abs(sin(0.10)) * hitbox.height)
         val projectedHeight = abs(cos(0.10)) * hitbox.height + abs(sin(0.10)) * hitbox.depth
         val extent = maxOf(projectedWidth, projectedHeight, hitbox.depth, 0.25)
@@ -130,9 +134,9 @@ internal class DialogueModelPortrait(private val player: Player) {
         base.setXHeadRot(if (talking) (sin(elapsedTicks++ * 0.32) * 3.0).toFloat() else 0f)
     }
 
-    private fun anchor(): Location = player.eyeLocation.clone().apply {
-        yaw = 0f
-        pitch = 0f
+    private fun anchor(): Location = player.eyeLocation.clone().also {
+        it.yaw = yaw
+        it.pitch = 0f
     }
 
     private fun removeModel() {
@@ -169,6 +173,8 @@ internal class DialogueModelPortrait(private val player: Player) {
     }
 
     private companion object {
+        /** Fixed yaw in departed_dialogue_model_vsh.glsl's projection. */
+        const val SHADER_YAW = -0.23
         val owners = ConcurrentHashMap<UUID, DialogueModelPortrait>()
     }
 }

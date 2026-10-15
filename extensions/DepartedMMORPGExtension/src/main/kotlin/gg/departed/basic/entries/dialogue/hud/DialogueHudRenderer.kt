@@ -18,6 +18,12 @@ data class HudChoice(val label: Component, val index: Int)
  */
 object DialogueHudRenderer {
     private const val BODY_WIDTH = 280
+    private const val BODY_X = -86
+    /** Without a portrait the parchment spans logical x 20..408 (shader frames 38 / 44..47). */
+    private const val WIDE_BODY_WIDTH = 368
+    private const val WIDE_BODY_X = -182
+    private const val NAMEPLATE_WIDTH = 280
+    private const val CENTERED_NAMEPLATE_X = -NAMEPLATE_WIDTH / 2
     private const val OPTION_WIDTH = 366
     private const val FOOTER_WIDTH = 380
     private const val OPTION_PAGE_MILLIS = 3_000L
@@ -33,6 +39,7 @@ object DialogueHudRenderer {
      * Pass all available [choices]; [shownChoices] is zero while their normal typewriter animation is pending.
      * Long selected responses rotate in two-row pages without changing the existing confirmation behavior.
      * [completedBodyMillis] is time since the body finished or was skipped; complete overflow text cycles all pages.
+     * [portrait] false (no speaking NPC) drops the character window and widens the speech.
      */
     fun render(
         speaker: Component,
@@ -45,16 +52,23 @@ object DialogueHudRenderer {
         elapsedMillis: Long = 0L,
         responseHeader: Component = Component.text("YOUR RESPONSE", NamedTextColor.GOLD),
         completedBodyMillis: Long = 0L,
+        portrait: Boolean = true,
     ): Component {
         val output = mutableListOf<Component>()
         val capacity = minOf(4, choices.size)
-        output.add(panel(if (capacity == 0) 0xE005 else 0xE00F + capacity, -210, 226))
-        output.add(panel(0xE020, -86, 203))
-        val name = fitOneLine(speaker, BODY_WIDTH)
-        output.add(row(0, name, -86 + (BODY_WIDTH - name.width) / 2, NamedTextColor.GOLD))
+        val frame = when {
+            portrait -> if (capacity == 0) 0xE005 else 0xE00F + capacity
+            else -> if (capacity == 0) 0xE006 else 0xE013 + capacity
+        }
+        output.add(panel(frame, -210, 226))
+        val nameplateX = if (portrait) BODY_X else CENTERED_NAMEPLATE_X
+        output.add(panel(0xE020, nameplateX, 203))
+        val name = fitOneLine(speaker, NAMEPLATE_WIDTH)
+        output.add(row(0, name, nameplateX + (NAMEPLATE_WIDTH - name.width) / 2, NamedTextColor.GOLD))
 
+        val bodyX = if (portrait) BODY_X else WIDE_BODY_X
         val bodyGlyphs = layout.glyphs(body)
-        val bodyLines = layout.wrap(bodyGlyphs, BODY_WIDTH)
+        val bodyLines = layout.wrap(bodyGlyphs, if (portrait) BODY_WIDTH else WIDE_BODY_WIDTH)
         val bodyPages = bodyLines.chunked(4)
         val bodyPage = if (revealedCharacters >= bodyGlyphs.size && bodyPages.size > 1) {
             val page = ((completedBodyMillis.coerceAtLeast(0L) / BODY_PAGE_MILLIS) % bodyPages.size).toInt()
@@ -62,7 +76,7 @@ object DialogueHudRenderer {
         } else layout.bodyPage(bodyLines, revealedCharacters)
         bodyPage.lines.forEachIndexed { index, line ->
             output.add(row(index + 1, HudLine(line.glyphs.filter { it.sourceIndex < revealedCharacters }),
-                -86, parchmentInk, parchment = true))
+                bodyX, parchmentInk, parchment = true))
         }
 
         val visible = visibleChoices(choices, selectedIndex, shownChoices.coerceIn(0, 4))

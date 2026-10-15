@@ -5,6 +5,7 @@ import gg.departed.basic.entries.dialogue.ActionBarDialogueEntry
 import gg.departed.basic.entries.dialogue.TalkIndicator
 import gg.departed.basic.entries.dialogue.NpcNodController
 import gg.departed.basic.entries.dialogue.useDialogueHud
+import gg.departed.basic.entries.dialogue.hud.DialogueFacing
 import gg.departed.basic.entries.dialogue.hud.DialogueHudRenderer
 import gg.departed.basic.entries.dialogue.hud.DialogueNpcPortrait
 import gg.departed.basic.entries.dialogue.hud.clearDialogueHud
@@ -99,7 +100,10 @@ class JavaActionBarDialogueDialogueMessenger(
 
         // The player might have had something before this. So we want to clean the chat before sending our message.
         if (hudEnabled) {
-            runSync { hudPortrait?.show(NpcNodController.resolveSpeakerId("", entry.speaker.get(), player)) }
+            runSync {
+                val npcId = NpcNodController.resolveSpeakerId("", entry.speaker.get(), player)
+                hudPortrait?.show(npcId, DialogueFacing.resolve(null, npcId))
+            }
         } else player.chatHistory.resendMessages(player)
     }
 
@@ -141,6 +145,7 @@ class JavaActionBarDialogueDialogueMessenger(
                 revealedCharacters = revealed,
                 hint = "<gold>$key</gold><gray> to $action</gray>".asMini(),
                 completedBodyMillis = (playTime - typingDuration).toMillis().coerceAtLeast(0L),
+                portrait = hudPortrait?.shown ?: true,
             ))
             lastHudReveal = revealed
             lastHudSentAt = playTime

@@ -9,6 +9,7 @@ import gg.departed.basic.entries.dialogue.OptionDialogueEntry
 import gg.departed.basic.entries.dialogue.OptionMarks
 import gg.departed.basic.entries.dialogue.TalkIndicator
 import gg.departed.basic.entries.dialogue.useDialogueHud
+import gg.departed.basic.entries.dialogue.hud.DialogueFacing
 import gg.departed.basic.entries.dialogue.hud.DialogueHudRenderer
 import gg.departed.basic.entries.dialogue.hud.DialogueNpcPortrait
 import gg.departed.basic.entries.dialogue.hud.HudChoice
@@ -199,7 +200,7 @@ class JavaOptionDialogueDialogueMessenger(
         // Nod the speaking NPC's head while the line types out.
         runSync {
             nodNpcId = NpcNodController.resolveSpeakerId(entry.npcSpeaker, entry.speaker.get(), player)
-            hudPortrait?.show(nodNpcId)
+            hudPortrait?.show(nodNpcId, DialogueFacing.resolve(entry.portraitFacing, nodNpcId))
             NpcNodController.start(nodNpcId, player, (totalDuration.toMillis() / 50L).toInt().coerceAtLeast(1))
         }
     }
@@ -297,6 +298,7 @@ class JavaOptionDialogueDialogueMessenger(
             responseHeader = DepartedLang.tr(player, "Your response").asMini()
                 .colorIfAbsent(net.kyori.adventure.text.format.NamedTextColor.GOLD),
             completedBodyMillis = timeAfterTyping,
+            portrait = hudPortrait?.shown ?: entry.npcSpeaker.isNotBlank(),
         ))
         lastHudSentAt = playTime
     }

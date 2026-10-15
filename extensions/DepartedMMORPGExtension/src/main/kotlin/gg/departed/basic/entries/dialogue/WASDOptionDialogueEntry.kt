@@ -39,6 +39,8 @@ class OptionDialogueEntry(
     val speakerName: Var<String> = ConstVar(""),
     @Help("The DepartedNPC id that speaks this line; its head nods while talking.")
     val npcSpeaker: String = "",
+    @Help("Dialogue HUD portrait facing for this line: left, right, front, or degrees (+ = toward screen right). Empty uses the NPC's configured facing.")
+    val portraitFacing: String = "",
     @Placeholder
     @Colored
     val text: Var<String> = ConstVar(""),

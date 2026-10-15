@@ -7,6 +7,7 @@ import gg.departed.basic.entries.dialogue.NpcNodController
 import gg.departed.basic.entries.dialogue.SpokenDialogueEntry
 import gg.departed.basic.entries.dialogue.TalkIndicator
 import gg.departed.basic.entries.dialogue.useDialogueHud
+import gg.departed.basic.entries.dialogue.hud.DialogueFacing
 import gg.departed.basic.entries.dialogue.hud.DialogueHudRenderer
 import gg.departed.basic.entries.dialogue.hud.DialogueNpcPortrait
 import gg.departed.basic.entries.dialogue.hud.clearDialogueHud
@@ -136,7 +137,7 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
             registerConfirmListener()
             // Nod the speaking NPC's head for roughly as long as the line takes to type out.
             nodNpcId = NpcNodController.resolveSpeakerId(entry.npcSpeaker, entry.speaker.get(), player)
-            hudPortrait?.show(nodNpcId)
+            hudPortrait?.show(nodNpcId, DialogueFacing.resolve(entry.portraitFacing, nodNpcId))
             NpcNodController.start(nodNpcId, player, (typingDuration.toMillis() / 50L).toInt().coerceAtLeast(1))
             // Remember who is talking so out-of-band NPC speech (quest-busy line) can use them.
             LastSpeakerTracker.record(player.uniqueId, speakerDisplayName, voiceActor ?: "", nodNpcId)
@@ -232,6 +233,7 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
                 hint = "<gold>Jump / Shift</gold><gray> to $action</gray>".asMini(),
                 elapsedMillis = playedTime.toMillis(),
                 completedBodyMillis = (playedTime - typingDuration).toMillis().coerceAtLeast(0L),
+                portrait = hudPortrait?.shown ?: entry.npcSpeaker.isNotBlank(),
             ))
             lastHudReveal = revealed
             lastHudSentAt = playedTime
