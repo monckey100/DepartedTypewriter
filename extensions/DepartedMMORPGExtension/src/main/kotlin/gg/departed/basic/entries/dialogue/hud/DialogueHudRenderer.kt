@@ -26,12 +26,13 @@ object DialogueHudRenderer {
     private const val CENTERED_NAMEPLATE_X = -NAMEPLATE_WIDTH / 2
     private const val OPTION_WIDTH = 366
     private const val FOOTER_WIDTH = 380
+    private const val FRAME_ADVANCE = 227
     private const val OPTION_PAGE_MILLIS = 3_000L
     private const val BODY_PAGE_MILLIS = 4_000L
     private val layout by lazy { HudTextLayout(HudGlyphMetrics.bundled()) }
     private val spaceFont = Key.key("departed:dialogue/space")
     private val panelFont = Key.key("departed:dialogue/panels")
-    private val rowFonts = (0..19).map { Key.key("departed:dialogue/row_$it") }
+    private val rowFonts = (0..23).map { Key.key("departed:dialogue/row_$it") }
     private val parchmentInk = TextColor.color(0x3A2418)
 
     /**
@@ -60,7 +61,7 @@ object DialogueHudRenderer {
             portrait -> if (capacity == 0) 0xE005 else 0xE00F + capacity
             else -> if (capacity == 0) 0xE006 else 0xE013 + capacity
         }
-        output.add(panel(frame, -210, 226))
+        output.add(panel(frame, -210, FRAME_ADVANCE))
         val nameplateX = if (portrait) BODY_X else CENTERED_NAMEPLATE_X
         output.add(panel(0xE020, nameplateX, 203))
         val name = fitOneLine(speaker, NAMEPLATE_WIDTH)
@@ -89,8 +90,8 @@ object DialogueHudRenderer {
             visible.forEachIndexed { slot, choice ->
                 val selected = choice.index == selectedIndex
                 if (selected) {
-                    output.add(panel(0xE001 + slot, -190, 226))
-                    output.add(row(6 + slot * 2, fitOneLine(Component.text(">", NamedTextColor.GOLD), 12), -190))
+                    output.add(panel(0xE001 + slot, -190, FRAME_ADVANCE))
+                    output.add(row(20 + slot, fitOneLine(Component.text(">", NamedTextColor.GOLD), 12), -190))
                 }
                 val optionLines = layout.wrap(choice.label, OPTION_WIDTH)
                 val pageCount = (optionLines.size + 1) / 2
@@ -100,7 +101,10 @@ object DialogueHudRenderer {
                 val lines = optionLines.drop(pageIndex * 2).take(2).toMutableList()
                 if (!selected && optionLines.size > 2) lines[1] = layout.ellipsize(lines[1], OPTION_WIDTH)
                 if (selected && pageCount > 1) optionPageHint = "response ${pageIndex + 1}/$pageCount"
-                lines.forEachIndexed { index, line -> output.add(row(6 + slot * 2 + index, line, -176)) }
+                lines.forEachIndexed { index, line ->
+                    val rowIndex = if (lines.size == 1) 20 + slot else 6 + slot * 2 + index
+                    output.add(row(rowIndex, line, -176))
+                }
             }
         }
 

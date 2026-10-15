@@ -31,6 +31,12 @@ The launcher renders `.tpl` files at boot. Load the matching engine, extension a
 
 ## Character preview
 
+For live ModelEngine framing tests, edit the running server's `plugins/Typewriter/config.yml`, then run
+`/tw reload` and reopen the NPC conversation. `dialogue.hud.models.npcs.<npc-id>.offset-y` and `scale` override
+their global settings. Keep the same values in `config.yml.tpl` for persistence: the launcher renders that
+template at startup, while Typewriter reloads the generated `config.yml` directly. A new engine JAR requires
+one server restart before its updated reload behavior is available.
+
 The preview uses a viewer-only rendering carrier and the NPC's existing resources. It does not replace or move the original NPC, change the player's camera, or require an image file per character. The player-style preview uses the cached skin, including mirror skins and the skin's slim/classic model selection.
 
 ModelEngine NPCs use an independent instance of their existing blueprint with the original textures and configured animation. A private dummy base restricts that instance to the dialogue player. Preview animation skips global script/effect keyframes so a visual copy cannot replay gameplay commands. PlayerLimb models reuse their configured or mirrored skin. Fitting uses the model's authored main hitbox; accessories outside that hitbox may need framing adjustment after an in-game check. Ordinary `MOB` NPCs do not yet have a dedicated portrait renderer.

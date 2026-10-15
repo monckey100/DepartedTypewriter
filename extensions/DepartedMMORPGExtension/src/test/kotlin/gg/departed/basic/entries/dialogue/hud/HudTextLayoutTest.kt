@@ -9,10 +9,21 @@ import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import javax.imageio.ImageIO
 
 class HudTextLayoutTest {
     private val metrics = HudGlyphMetrics(mapOf('W'.code to 8, 'i'.code to 2, ' '.code to 3, 0x1F600 to 9))
     private val layout = HudTextLayout(metrics)
+    private val frameAdvance by lazy { bitmapAdvance("dialogue_frame.png") }
+    private val nameplateAdvance by lazy { bitmapAdvance("title_bar.png") }
+
+    private fun bitmapAdvance(name: String): Int {
+        val image = ImageIO.read(javaClass.getResourceAsStream("/dialogue-hud/$name"))
+        val right = (0 until image.width).last { x ->
+            (0 until image.height).any { y -> image.getRGB(x, y).ushr(24) != 0 }
+        }
+        return right + 2
+    }
 
     @Test
     fun `wrap uses pixel width and splits an oversized word without losing letters`() {
@@ -90,33 +101,52 @@ class HudTextLayoutTest {
         val bundled = HudGlyphMetrics.bundled()
         for (revealed in listOf(0, 4, Int.MAX_VALUE)) {
             for (selected in 0..3) {
-                val component = DialogueHudRenderer.render(
-                    Component.text("Elder Rowan"),
-                    Component.text("The ruins are dangerous. Take care, traveller."),
-                    revealed,
-                    (0..3).map { HudChoice(Component.text("Response $it"), it) },
-                    selected,
-                    hint = Component.text("W/S choose · Space confirm"),
-                )
-                component.children().forEach { part ->
-                    val advance = HudTextLayout(bundled).glyphs(part).sumOf { glyph ->
-                        val font = glyph.style.font().toString()
-                        when {
-                            font.endsWith("/space") -> when (glyph.codePoint) {
-                                in 0xE100..0xE10B -> -(1 shl (glyph.codePoint - 0xE100))
-                                else -> 1 shl (glyph.codePoint - 0xE110)
+                for (shown in listOf(0, 1, 4)) {
+                    for (portrait in listOf(false, true)) {
+                        val component = DialogueHudRenderer.render(
+                            Component.text("Elder Rowan"),
+                            Component.text("The ruins are dangerous. Take care, traveller."),
+                            revealed,
+                            (0..3).map { HudChoice(Component.text("Response $it"), it) },
+                            selected,
+                            shownChoices = shown,
+                            hint = Component.text("W/S choose · Space confirm"),
+                            portrait = portrait,
+                        )
+                        component.children().forEach { part ->
+                            val advance = HudTextLayout(bundled).glyphs(part).sumOf { glyph ->
+                                val font = glyph.style.font().toString()
+                                when {
+                                    font.endsWith("/space") -> when (glyph.codePoint) {
+                                        in 0xE100..0xE10B -> -(1 shl (glyph.codePoint - 0xE100))
+                                        else -> 1 shl (glyph.codePoint - 0xE110)
+                                    }
+                                    font.endsWith("/panels") -> when (glyph.codePoint) {
+                                        0xE020 -> nameplateAdvance
+                                        else -> frameAdvance
+                                    }
+                                    else -> glyph.advance
+                                }
                             }
-                            font.endsWith("/panels") -> when (glyph.codePoint) {
-                                0xE020 -> 203
-                                else -> 226
-                            }
-                            else -> glyph.advance
+                            assertEquals(0, advance)
                         }
                     }
-                    assertEquals(0, advance)
                 }
             }
         }
+    }
+    @Test
+    fun `single line labels and selection arrows use centered rows while wrapped labels use both rows`() {
+        val rendered = DialogueHudRenderer.render(
+            Component.text("Rowan"), Component.text("Hello"),
+            choices = listOf(HudChoice(Component.text("Short"), 0), HudChoice(Component.text("A".repeat(100)), 1)),
+        )
+        val glyphs = layout.glyphs(rendered)
+        val centered = glyphs.filter { it.style.font() == Key.key("departed:dialogue/row_20") }
+        assertEquals(">Short", HudLine(centered).text)
+        assertFalse(glyphs.any { it.style.font() == Key.key("departed:dialogue/row_6") })
+        assertTrue(glyphs.any { it.style.font() == Key.key("departed:dialogue/row_8") })
+        assertTrue(glyphs.any { it.style.font() == Key.key("departed:dialogue/row_9") })
     }
 
     @Test
@@ -184,7 +214,8 @@ class HudTextLayoutTest {
             return buildString {
                 layout.glyphs(rendered).filter {
                     it.style.font() == Key.key("departed:dialogue/row_6") ||
-                        it.style.font() == Key.key("departed:dialogue/row_7")
+                        it.style.font() == Key.key("departed:dialogue/row_7") ||
+                        it.style.font() == Key.key("departed:dialogue/row_20")
                 }.filter { it.codePoint != '>'.code }.forEach { appendCodePoint(it.codePoint) }
             }
         }

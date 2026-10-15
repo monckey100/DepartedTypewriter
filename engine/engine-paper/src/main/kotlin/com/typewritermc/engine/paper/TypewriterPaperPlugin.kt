@@ -214,6 +214,7 @@ class TypewriterPaperPlugin : KotlinPlugin(), KoinComponent {
 
     suspend fun reload(seedStaging: Boolean = true) {
         unload()
+        reloadConfig()
         load(seedStaging)
     }
 
