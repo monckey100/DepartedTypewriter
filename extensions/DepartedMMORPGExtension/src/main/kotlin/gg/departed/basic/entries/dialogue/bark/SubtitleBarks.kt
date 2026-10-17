@@ -57,6 +57,7 @@ object SubtitleBarks {
         var startedAt: Long = -1
         var lastSentTick: Int = Int.MIN_VALUE
         var lastRevealed: Int = -1
+        var lastFraction: Double = 1.0
         val createdAt: Long = System.currentTimeMillis()
     }
 
@@ -105,8 +106,11 @@ object SubtitleBarks {
             val revealed = if (complete) bark.characters else
                 revealedHudCharacters(bark.body.asMini(), elapsed.toDouble() / bark.typingMillis.coerceAtLeast(1))
             val passthrough = foreign[uuid]?.takeIf { now - it.at < FOREIGN_MILLIS }?.component
-            if (complete && revealed == bark.lastRevealed && tick - bark.lastSentTick < IDLE_RESEND_TICKS && passthrough == null) continue
             val fraction = if (complete) 1.0 - (elapsed - bark.typingMillis).toDouble() / bark.holdMillis else 1.0
+            // Redraw every tick while the timer bar drains so it moves pixel by pixel, not in half-second steps.
+            val barMoved = complete && (bark.lastFraction - fraction) * SubtitleHudRenderer.BODY_WIDTH >= 1.0
+            if (complete && revealed == bark.lastRevealed && !barMoved && tick - bark.lastSentTick < IDLE_RESEND_TICKS && passthrough == null) continue
+            bark.lastFraction = fraction
             player.sendActionBar(SubtitleHudRenderer.render(
                 speaker = bark.speaker,
                 body = bark.body.asMini(),

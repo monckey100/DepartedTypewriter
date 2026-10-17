@@ -144,22 +144,19 @@ internal object SubtitleHudRenderer {
     /** A [width] px wide, 2 px tall bar on the footer row, from binary-width pieces U+E200..U+E208. */
     private fun bar(x: Int, width: Int, color: TextColor): Component {
         var remaining = width.coerceIn(0, 511)
-        var pieces = 0
-        val text = buildString {
-            while (remaining > 0) {
-                val bit = (31 - Integer.numberOfLeadingZeros(remaining)).coerceAtMost(8)
-                appendCodePoint(0xE200 + bit)
-                remaining -= 1 shl bit
-                pieces++
-            }
+        if (remaining == 0) return Component.empty()
+        val parts = mutableListOf(spacing(x))
+        val style = Style.style().font(rowFonts[FOOTER_ROW]).color(color).shadowColor(ShadowColor.none()).build()
+        while (remaining > 0) {
+            val bit = (31 - Integer.numberOfLeadingZeros(remaining)).coerceAtMost(8)
+            // Every bitmap glyph advances its width + 1 px of spacing; pull that pixel back right away so the
+            // pieces butt together with no notch between them.
+            parts.add(Component.text(String(Character.toChars(0xE200 + bit))).style(style))
+            parts.add(spacing(-1))
+            remaining -= 1 shl bit
         }
-        if (pieces == 0) return Component.empty()
-        return children(listOf(
-            spacing(x),
-            Component.text(text).font(rowFonts[FOOTER_ROW]).color(color).shadowColor(ShadowColor.none()),
-            // Each bitmap piece advances its width + 1 px of glyph spacing.
-            spacing(-x - width - pieces),
-        ))
+        parts.add(spacing(-x - width))
+        return children(parts)
     }
 
     private fun panel(glyph: Int, x: Int, advance: Int): Component = children(listOf(
