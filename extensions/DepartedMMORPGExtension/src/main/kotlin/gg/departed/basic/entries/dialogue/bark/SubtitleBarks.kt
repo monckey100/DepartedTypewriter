@@ -179,7 +179,8 @@ class SubtitleBarkService : Initializable, Listener {
 /**
  * `dsay <player> <holdSeconds> <speaker> <text...>` - show an auto-dismissing subtitle line.
  * `speaker` is one token: `_` becomes a space, `&` codes or MiniMessage set its colour (`&4&lPólemos`,
- * `Traumatized_Villager`, `-` for narration with no name). `text` is the rest of the line.
+ * `Traumatized_Villager`, `-` for narration with no name), or `[words with spaces]` (e.g. `[<caster.name>]`).
+ * `text` is the rest of the line.
  */
 private class DsayCommand : Command("dsay") {
     init {
@@ -203,9 +204,19 @@ private class DsayCommand : Command("dsay") {
             sender.sendMessage("dsay: holdSeconds must be a number, got ${args[1]}")
             return true
         }
-        val speakerRaw = args[2].replace('_', ' ')
+        // Speaker: one token (`_` = space), or `[several words]` for names MythicMobs expands with spaces.
+        var textStart = 3
+        val speakerRaw = if (args[2].startsWith("[")) {
+            val end = args.indices.firstOrNull { it >= 2 && args[it].endsWith("]") } ?: (args.size - 1)
+            textStart = end + 1
+            args.slice(2..end).joinToString(" ").removePrefix("[").removeSuffix("]")
+        } else args[2].replace('_', ' ')
         val speaker = if (speakerRaw == "-") Component.empty() else SubtitleBarks.parseText(speakerRaw)
-        val text = args.drop(3).joinToString(" ").parsePlaceholders(player)
+        val text = args.drop(textStart).joinToString(" ").parsePlaceholders(player)
+        if (text.isBlank()) {
+            sender.sendMessage(usage)
+            return true
+        }
         val body = if (text.contains('&') || text.contains('§')) {
             // Normalise legacy colours to MiniMessage so the renderer sees one format.
             net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(SubtitleBarks.parseText(text))
