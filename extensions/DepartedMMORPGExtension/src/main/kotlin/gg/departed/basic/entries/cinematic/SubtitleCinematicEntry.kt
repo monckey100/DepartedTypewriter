@@ -23,9 +23,10 @@ import com.typewritermc.engine.paper.entry.entries.SpeakerEntry
 import com.typewritermc.engine.paper.entry.entries.Var
 import com.typewritermc.engine.paper.entry.entries.activeSegmentAt
 import com.typewritermc.engine.paper.entry.entries.canFinishAt
-import com.typewritermc.engine.paper.entry.temporal.setTemporalFrame
-import com.typewritermc.engine.paper.entry.temporal.setTemporalPaused
+import com.typewritermc.engine.paper.entry.temporal.TemporalSetFrameTrigger
+import com.typewritermc.engine.paper.entry.triggerFor
 import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
+import com.typewritermc.engine.paper.interaction.interactionContext
 import com.typewritermc.engine.paper.plugin
 import com.typewritermc.engine.paper.snippets.snippet
 import com.typewritermc.engine.paper.utils.Sync
@@ -48,10 +49,10 @@ import org.bukkit.event.player.PlayerToggleSneakEvent
 @Entry("departed_subtitle_cinematic", "Cutscene subtitle on the dialogue HUD band", Colors.CYAN, "mingcute:subtitle-fill")
 /**
  * The `Subtitle Cinematic` shows cutscene dialogue on the bottom-anchored HUD band (no chat, no action-bar
- * overflow). Each segment types out at the subtitle pace. When the segment reaches its end frame the cinematic
- * clock PAUSES there and the line stays up until the player presses Jump or Shift (a press while typing completes
- * the sentence first). The press jumps the cinematic to the next line, so every command between still fires.
- * A 250 ms grace after each press ignores a fat-fingered double tap. There is deliberately no whole-cutscene skip.
+ * overflow). Each segment types out at the subtitle pace and auto-advances on the authored frames; a gold bar
+ * under the line drains so the player sees it will move on. Jump or Shift completes the sentence, and a second
+ * press jumps the cinematic to the next line (so every command between still fires). A 250 ms grace after each
+ * press ignores a fat-fingered double tap. There is deliberately no whole-cutscene skip.
  *
  * ## How could this be used?
  *
@@ -90,7 +91,7 @@ class SubtitleCinematicAction(
     @Volatile private var current: MultiLineDisplayDialogueSegment? = null
     private var currentFrame = 0
     private var startedAtMillis = 0L
-    private var holding = false
+    private var lastBarPixels = -1
     private var body = ""
     private var totalCharacters = 0
     private var typingMillis = 0L
@@ -114,47 +115,42 @@ class SubtitleCinematicAction(
     override suspend fun tick(frame: Int) {
         super.tick(frame)
         currentFrame = frame
-        val active = segments activeSegmentAt frame
-        if (active != null && active !== current) startSegment(active, frame)
-        // Linger: a finished line stays up until another subtitle line (this entry or another one in the
-        // same cinematic) starts, or the cinematic ends, so short lines get read.
-        val segment = active ?: current ?: return
-        if (SubtitleBandOwner.owner(player) !== this) {
-            if (current != null && active == null) current = null
+        val segment = segments activeSegmentAt frame
+        if (segment == null) {
+            if (current != null) {
+                current = null
+                if (SubtitleBandOwner.owner(player) === this) player.clearDialogueHud()
+            }
             return
         }
+        if (segment !== current) startSegment(segment, frame)
+        // Overlapping entries: the line that started last owns the band.
+        if (SubtitleBandOwner.owner(player) !== this) return
 
         if (pendingAdvance) {
             pendingAdvance = false
             jumpToNextLine(segment, frame)
             return
         }
-        // End of the segment: freeze the cinematic one frame before its end and wait for the player, so a
-        // command placed on the end frame (a fade, a warp) runs after the press, not under the held line.
-        val holdFrame = (segment.endFrame - 1).coerceAtLeast(segment.startFrame)
-        if (!holding && frame >= holdFrame) {
-            holding = true
-            player.setTemporalFrame(holdFrame)
-            player.setTemporalPaused(true)
-        }
-
-        // Typing runs on the wall clock so it still finishes while the cinematic clock is frozen.
         val elapsed = System.currentTimeMillis() - startedAtMillis
         val complete = forcedComplete || elapsed >= typingMillis
         val revealed = if (complete) totalCharacters else
             revealedHudCharacters(body.asMini(), elapsed.toDouble() / typingMillis.coerceAtLeast(1))
-        // Typing: redraw every frame. Idle: refresh every half second (the client fades an action bar out
-        // after three seconds) unless a press changed what is shown.
-        if (complete && revealed == lastRevealed && frame - lastRenderFrame < 10) return
-        val hint = (if (complete) subtitleHintNext else subtitleHintComplete).asMini()
+        // The gold bar drains over the authored segment so the player sees the line will auto-advance.
+        val fraction = (segment.endFrame - frame).toDouble() / (segment.endFrame - segment.startFrame).coerceAtLeast(1)
+        val barPixels = (fraction.coerceIn(0.0, 1.0) * SubtitleHudRenderer.BODY_WIDTH).toInt()
+        // Typing: redraw every frame. Otherwise redraw when the bar moves a pixel, and at least every half
+        // second (the client fades an action bar out after three seconds).
+        if (complete && revealed == lastRevealed && barPixels == lastBarPixels && frame - lastRenderFrame < 10) return
         player.showDialogueHud(SubtitleHudRenderer.render(
             speaker = speakerName().asMini(),
             body = body.asMini(),
             revealedCharacters = revealed,
-            footer = SubtitleHudRenderer.Footer.Hint(hint),
+            footer = SubtitleHudRenderer.Footer.Timer(fraction),
             centered = entry.centered,
         ))
         lastRevealed = revealed
+        lastBarPixels = barPixels
         lastRenderFrame = frame
     }
 
@@ -162,7 +158,7 @@ class SubtitleCinematicAction(
         current = segment
         SubtitleBandOwner.claim(player, this)
         startedAtMillis = System.currentTimeMillis()
-        holding = false
+        lastBarPixels = -1
         forcedComplete = false
         pendingAdvance = false
         lastRevealed = -1
@@ -211,12 +207,11 @@ class SubtitleCinematicAction(
     }
 
     private fun jumpToNextLine(segment: MultiLineDisplayDialogueSegment, frame: Int) {
-        holding = false
-        player.setTemporalPaused(false)
         val next = segments.filter { it.startFrame > segment.startFrame }.minByOrNull { it.startFrame }
         val target = next?.startFrame ?: (segment.endFrame + 1)
         if (target <= frame) return
-        player.setTemporalFrame(target)
+        val context = player.interactionContext ?: return
+        TemporalSetFrameTrigger(target).triggerFor(player, context)
     }
 
     private fun registerPacketListener() {
@@ -249,7 +244,6 @@ class SubtitleCinematicAction(
         super.teardown()
         current = null
         SubtitleBandOwner.release(player, this)
-        if (holding) player.setTemporalPaused(false)
         Dispatchers.Sync.switchContext {
             HandlerList.unregisterAll(this@SubtitleCinematicAction)
             packetListener?.let { runCatching { PacketEvents.getAPI().eventManager.unregisterListener(it) } }
