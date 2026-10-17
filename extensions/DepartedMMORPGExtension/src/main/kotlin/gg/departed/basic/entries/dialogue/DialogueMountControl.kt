@@ -76,7 +76,16 @@ object DialogueMountControl {
             try { if (player.isOnline && player.vehicle == handle.stand) player.leaveVehicle() } catch (_: Throwable) {}
             try { if (!handle.stand.isDead) handle.stand.remove() } catch (_: Throwable) {}
             if (player.isOnline) player.fallDistance = 0f
+            // The conversation is truly over (no node re-claimed the mount): cut the NPC's voice so
+            // it doesn't keep talking after the dialogue closed (owner request 2026-10-17).
+            stopVoice(player)
         }, TEARDOWN_DELAY_TICKS)
+    }
+
+    /** Stop the procedural NPC voice (DepartedRPG /stoptalk) for this player. MAIN THREAD. */
+    private fun stopVoice(player: Player?) {
+        if (player == null || !player.isOnline) return
+        try { Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") } catch (_: Throwable) {}
     }
 
     /** The stand currently seating this player, if any. Used to veto the vanilla shift-dismount. */
@@ -109,6 +118,7 @@ object DialogueMountControl {
         try { if (player != null && player.vehicle == handle.stand) player.leaveVehicle() } catch (_: Throwable) {}
         try { if (!handle.stand.isDead) handle.stand.remove() } catch (_: Throwable) {}
         if (player != null && player.isOnline) player.fallDistance = 0f
+        stopVoice(player) // the lock let go (damage / warp / logout) = the talk is over too
     }
 
     /**
