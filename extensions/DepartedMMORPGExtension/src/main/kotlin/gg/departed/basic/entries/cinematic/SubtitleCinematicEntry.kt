@@ -75,7 +75,7 @@ class SubtitleCinematicEntry(
 }
 
 /** Typing pace of subtitle lines in milliseconds per character (barks use it too). */
-val subtitleMillisPerCharacter: Int by snippet("cinematic.subtitle.millisPerCharacter", 30)
+val subtitleMillisPerCharacter: Int by snippet("cinematic.subtitle.millisPerCharacter", 40)
 /** Presses closer together than this are ignored, so a double tap never skips a line unread. */
 val subtitleGraceMillis: Long by snippet("cinematic.subtitle.graceMillis", 250L)
 private val subtitleHintNext: String by snippet("cinematic.subtitle.hint.next", "<gold>Jump / Shift</gold><gray> next line</gray>")
@@ -112,15 +112,15 @@ class SubtitleCinematicAction(
     override suspend fun tick(frame: Int) {
         super.tick(frame)
         currentFrame = frame
-        val segment = segments activeSegmentAt frame
-        if (segment == null) {
-            if (current != null) {
-                current = null
-                player.clearDialogueHud()
-            }
+        val active = segments activeSegmentAt frame
+        if (active != null && active !== current) startSegment(active, frame)
+        // Linger: a finished line stays up until another subtitle line (this entry or another one in the
+        // same cinematic) starts, or the cinematic ends, so short lines get read.
+        val segment = active ?: current ?: return
+        if (SubtitleBandOwner.owner(player) !== this) {
+            if (current != null && active == null) current = null
             return
         }
-        if (segment !== current) startSegment(segment, frame)
 
         if (pendingAdvance) {
             pendingAdvance = false
@@ -149,6 +149,7 @@ class SubtitleCinematicAction(
 
     private suspend fun startSegment(segment: MultiLineDisplayDialogueSegment, frame: Int) {
         current = segment
+        SubtitleBandOwner.claim(player, this)
         forcedComplete = false
         pendingAdvance = false
         lastRevealed = -1
@@ -233,6 +234,7 @@ class SubtitleCinematicAction(
     override suspend fun teardown() {
         super.teardown()
         current = null
+        SubtitleBandOwner.release(player, this)
         Dispatchers.Sync.switchContext {
             HandlerList.unregisterAll(this@SubtitleCinematicAction)
             packetListener?.let { runCatching { PacketEvents.getAPI().eventManager.unregisterListener(it) } }
@@ -242,4 +244,12 @@ class SubtitleCinematicAction(
     }
 
     override fun canFinish(frame: Int): Boolean = segments canFinishAt frame
+}
+
+/** Which subtitle action currently owns the band for a player: the one whose line started last. */
+internal object SubtitleBandOwner {
+    private val owners = java.util.concurrent.ConcurrentHashMap<java.util.UUID, SubtitleCinematicAction>()
+    fun claim(player: Player, action: SubtitleCinematicAction) { owners[player.uniqueId] = action }
+    fun owner(player: Player): SubtitleCinematicAction? = owners[player.uniqueId]
+    fun release(player: Player, action: SubtitleCinematicAction) { owners.remove(player.uniqueId, action) }
 }
