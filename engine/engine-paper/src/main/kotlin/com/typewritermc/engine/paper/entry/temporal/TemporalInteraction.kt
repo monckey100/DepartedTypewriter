@@ -40,6 +40,10 @@ class TemporalInteraction(
     private var playTime = Duration.ofMillis(-1)
     val frame: Int get() = (playTime.toMillis() / 50).toInt()
 
+    /** While paused the clock stands still: actions keep ticking on the same frame (a subtitle waiting for the player). */
+    @Volatile
+    var paused: Boolean = false
+
     override val priority by lazy { Query.findPageById(pageId)?.priority ?: 0 }
 
     private lateinit var actions: List<CinematicAction>
@@ -83,7 +87,7 @@ class TemporalInteraction(
 
         // Make sure that the first frame is 0
         if (playTime.isNegative) playTime = Duration.ZERO
-        else playTime += deltaTime
+        else if (!paused) playTime += deltaTime
 
         coroutineScope {
             actions.map {
@@ -147,6 +151,18 @@ private val Player.temporalInteraction: TemporalInteraction?
     }
 
 fun Player.currentTemporalFrame(): Int? = temporalInteraction?.frame
+
+/** Freeze or release the running cinematic's clock (no-op when the player is not in one). */
+fun Player.setTemporalPaused(paused: Boolean) {
+    temporalInteraction?.paused = paused
+}
+
+fun Player.isTemporalPaused(): Boolean = temporalInteraction?.paused == true
+
+/** Jump the running cinematic to [frame] (commands between are replayed by the segment runner). */
+fun Player.setTemporalFrame(frame: Int) {
+    temporalInteraction?.frame(frame)
+}
 
 fun Player.isPlayingTemporal(pageId: String): Boolean = temporalInteraction?.pageId == pageId
 
