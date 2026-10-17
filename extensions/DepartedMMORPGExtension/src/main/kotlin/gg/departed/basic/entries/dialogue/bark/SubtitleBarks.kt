@@ -16,6 +16,7 @@ import com.typewritermc.engine.paper.utils.asMini
 import com.typewritermc.engine.paper.utils.server
 import com.typewritermc.engine.paper.utils.stripped
 import gg.departed.basic.entries.cinematic.subtitleMillisPerCharacter
+import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.hud.SubtitleHudRenderer
 import gg.departed.basic.entries.dialogue.hud.revealedHudCharacters
 import net.kyori.adventure.key.Key
@@ -211,8 +212,9 @@ private class DsayCommand : Command("dsay") {
             textStart = end + 1
             args.slice(2..end).joinToString(" ").removePrefix("[").removeSuffix("]")
         } else args[2].replace('_', ' ')
-        val speaker = if (speakerRaw == "-") Component.empty() else SubtitleBarks.parseText(speakerRaw)
-        val text = args.drop(textStart).joinToString(" ").parsePlaceholders(player)
+        // Translate like Typewriter dialogue (DepartedLanguage dictionaries key on the authored text).
+        val speaker = if (speakerRaw == "-") Component.empty() else SubtitleBarks.parseText(DepartedLang.tr(player, speakerRaw))
+        val text = DepartedLang.tr(player, args.drop(textStart).joinToString(" ")).parsePlaceholders(player)
         if (text.isBlank()) {
             sender.sendMessage(usage)
             return true
