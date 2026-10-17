@@ -69,6 +69,8 @@ class SubtitleCinematicEntry(
     val speakerName: Var<String> = ConstVar(""),
     @Help("Center the lines (cutscene style). Off = left aligned.")
     val centered: Boolean = true,
+    @Help("Jump/Shift completes the sentence and skips to the next line. Off = the player cannot speed anything up (Colette's act).")
+    val allowSkip: Boolean = true,
     @Segments(icon = "mingcute:subtitle-fill")
     val segments: List<MultiLineDisplayDialogueSegment> = emptyList(),
 ) : CinematicEntry {
@@ -193,6 +195,7 @@ class SubtitleCinematicAction(
 
     /** Jump/Shift: complete the sentence if it is still typing, otherwise go to the next line. */
     private fun press() {
+        if (!entry.allowSkip) return
         val segment = current ?: return
         val now = System.currentTimeMillis()
         if (now - lastPressAt < subtitleGraceMillis) return
