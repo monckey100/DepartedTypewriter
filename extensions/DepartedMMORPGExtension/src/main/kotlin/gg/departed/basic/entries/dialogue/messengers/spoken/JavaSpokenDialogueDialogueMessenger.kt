@@ -1,5 +1,6 @@
 package gg.departed.basic.entries.dialogue.messengers.spoken
 
+import gg.departed.basic.entries.dialogue.StoryLog
 import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.DialogueMountControl
 import gg.departed.basic.entries.dialogue.LastSpeakerTracker
@@ -101,6 +102,7 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
         val sourceText = entry.text.get(player)
         val localText = DepartedLang.tr(player, sourceText)
         text = localText.parsePlaceholders(player)
+        StoryLog.record(player, speakerDisplayName, text)
         typingDuration = typingDurationType.totalDuration(text.stripped(), entry.duration.get(player))
 
         // voice settings (locals cannot be 'private')

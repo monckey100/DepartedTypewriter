@@ -1,5 +1,6 @@
 package gg.departed.basic.entries.cinematic
 
+import gg.departed.basic.entries.dialogue.StoryLog
 import com.github.retrooper.packetevents.PacketEvents
 import com.github.retrooper.packetevents.event.PacketListenerAbstract
 import com.github.retrooper.packetevents.event.PacketListenerPriority
@@ -171,6 +172,7 @@ class SubtitleCinematicAction(
         val source = segment.text.get(player)
         val local = DepartedLang.tr(player, source)
         body = local.parsePlaceholders(player)
+        StoryLog.record(player, speakerName(), body)
         val plain = body.stripped()
         totalCharacters = plain.codePointCount(0, plain.length)
         typingMillis = totalCharacters.toLong() * subtitleMillisPerCharacter

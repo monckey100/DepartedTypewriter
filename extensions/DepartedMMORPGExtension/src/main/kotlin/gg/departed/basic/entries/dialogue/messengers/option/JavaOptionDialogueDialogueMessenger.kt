@@ -2,6 +2,7 @@ package gg.departed.basic.entries.dialogue.messengers.option
 
 import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.DialogueMountControl
+import gg.departed.basic.entries.dialogue.StoryLog
 import gg.departed.basic.entries.dialogue.NpcNodController
 import gg.departed.basic.entries.dialogue.Option
 import gg.departed.basic.entries.dialogue.OptionContextKeys
@@ -167,6 +168,7 @@ class JavaOptionDialogueDialogueMessenger(
         val sourceText = entry.text.get(player)
         val localText = DepartedLang.tr(player, sourceText)
         parsedText = localText.parsePlaceholders(player)
+        StoryLog.record(player, speakerDisplayName, parsedText)
 
         val rawText = parsedText.stripped()
         val typingDuration = typingDurationType.totalDuration(rawText, typeDuration)

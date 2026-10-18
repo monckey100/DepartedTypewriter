@@ -1,5 +1,6 @@
 package gg.departed.basic.entries.dialogue.bark
 
+import gg.departed.basic.entries.dialogue.StoryLog
 import com.github.retrooper.packetevents.PacketEvents
 import com.github.retrooper.packetevents.event.PacketListenerAbstract
 import com.github.retrooper.packetevents.event.PacketListenerPriority
@@ -70,6 +71,7 @@ object SubtitleBarks {
     private var tick = 0
 
     fun show(player: Player, speaker: Component, body: String, holdMillis: Long) {
+        StoryLog.record(player, net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(speaker), body)
         barks[player.uniqueId] = Bark(speaker, body, holdMillis.coerceAtLeast(500L))
     }
 
