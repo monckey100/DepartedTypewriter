@@ -10,7 +10,8 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSy
 import com.typewritermc.core.extension.Initializable
 import com.typewritermc.core.extension.annotations.Singleton
 import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
-import com.typewritermc.engine.paper.interaction.interactionContext
+import com.typewritermc.engine.paper.entry.temporal.isPlayingTemporal
+import gg.departed.basic.entries.dialogue.DialogueMountControl
 import com.typewritermc.engine.paper.plugin
 import com.typewritermc.engine.paper.utils.asMini
 import com.typewritermc.engine.paper.utils.server
@@ -92,8 +93,8 @@ object SubtitleBarks {
             if (player == null || !player.isOnline) { remove(uuid); continue }
             if (bark.startedAt < 0) {
                 if (now - bark.createdAt > PENDING_MILLIS) { remove(uuid); continue }
-                // Conversations and cinematics own the action bar; wait until the player is free.
-                if (player.interactionContext != null) continue
+                // Conversations (dialogue mount held) and cinematics own the action bar; wait until free.
+                if (player.isPlayingTemporal() || DialogueMountControl.heldStand(player) != null) continue
                 bark.startedAt = now
             }
             val elapsed = now - bark.startedAt

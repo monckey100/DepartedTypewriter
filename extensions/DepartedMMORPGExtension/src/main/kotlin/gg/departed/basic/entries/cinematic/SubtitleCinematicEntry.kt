@@ -81,8 +81,8 @@ class SubtitleCinematicEntry(
 val subtitleMillisPerCharacter: Int by snippet("cinematic.subtitle.millisPerCharacter", 40)
 /** Presses closer together than this are ignored, so a double tap never skips a line unread. */
 val subtitleGraceMillis: Long by snippet("cinematic.subtitle.graceMillis", 250L)
-private val subtitleHintNext: String by snippet("cinematic.subtitle.hint.next", "<gold>Jump / Shift</gold><gray> skip line</gray>")
-private val subtitleHintComplete: String by snippet("cinematic.subtitle.hint.complete", "<gold>Jump / Shift</gold><gray> show full line</gray>")
+private val subtitleHintNext: String by snippet("cinematic.subtitle.hint.next", "<gold>Jump / Shift</gold><gray> (optional)</gray>")
+private val subtitleHintComplete: String by snippet("cinematic.subtitle.hint.complete", "<gold>Jump / Shift</gold><gray> (optional)</gray>")
 
 class SubtitleCinematicAction(
     private val player: Player,
