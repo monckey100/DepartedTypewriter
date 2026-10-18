@@ -34,6 +34,20 @@ object DialogueHudRenderer {
     private val panelFont = Key.key("departed:dialogue/panels")
     private val rowFonts = (0..23).map { Key.key("departed:dialogue/row_$it") }
     private val parchmentInk = TextColor.color(0x3A2418)
+    /**
+     * Bright named colours are unreadable on the parchment (owner 2026-10-17: the <gold> player name in
+     * Benny's lines): authored highlights are drawn in a darker ink of the same hue there. Hex colours and
+     * the dark_* colours are kept as written.
+     */
+    private val parchmentHighlights: Map<Int, TextColor> = listOf(
+        NamedTextColor.GOLD.value() to TextColor.color(0x9A4A00),
+        NamedTextColor.YELLOW.value() to TextColor.color(0x7A5C00),
+        NamedTextColor.RED.value() to TextColor.color(0xA01818),
+        NamedTextColor.GREEN.value() to TextColor.color(0x2E6B12),
+        NamedTextColor.AQUA.value() to TextColor.color(0x0E6470),
+        NamedTextColor.BLUE.value() to TextColor.color(0x1F3FA0),
+        NamedTextColor.LIGHT_PURPLE.value() to TextColor.color(0x8A2A8A),
+    ).toMap()
 
     /**
      * [revealedCharacters] counts Unicode code points in the fully parsed body, including spaces/newlines.
@@ -152,6 +166,8 @@ object DialogueHudRenderer {
                 .font(rowFonts[index])
                 .color(if (parchment && glyph.style.color() in listOf(null, NamedTextColor.WHITE, NamedTextColor.GRAY)) {
                     defaultColor
+                } else if (parchment) {
+                    glyph.style.color()?.let { parchmentHighlights[it.value()] ?: it } ?: defaultColor
                 } else glyph.style.color() ?: defaultColor)
                 .decoration(TextDecoration.BOLD, glyph.style.hasDecoration(TextDecoration.BOLD))
                 .decoration(TextDecoration.ITALIC, false)
