@@ -26,6 +26,7 @@ internal object SubtitleHudRenderer {
     private const val STRIP_ADVANCE = 227
     private const val MAX_LINES = 3
     private const val FOOTER_ROW = 24
+    private const val BAR_ROW = 28
     private val BODY_ROWS = listOf(25, 26, 27)
     private val SPEAKER_ROW_BY_LINES = mapOf(1 to 31, 2 to 30, 3 to 29)
     private val layout by lazy { HudTextLayout(HudGlyphMetrics.bundled()) }
@@ -39,11 +40,11 @@ internal object SubtitleHudRenderer {
     private val timerTrack = TextColor.color(0x5A4632)
     private val shadow = ShadowColor.shadowColor(0xFF140E08.toInt())
 
-    sealed interface Footer {
-        data class Hint(val text: Component) : Footer
-        /** [fraction] of the dismiss time still left (1 = full bar). */
-        data class Timer(val fraction: Double) : Footer
-        data object None : Footer
+    /** [hint] on the footer row; [timer] = fraction of the time left (1 = full bar) on the bar row at the strip's edge. */
+    data class Footer(val hint: Component? = null, val timer: Double? = null) {
+        companion object {
+            val None = Footer()
+        }
     }
 
     /**
@@ -78,17 +79,14 @@ internal object SubtitleHudRenderer {
             // Center on the full line so letters never slide while the line types out.
             output.add(row(rows[index], visible, x(line, centered), bodyInk, parchment = true))
         }
-        when (footer) {
-            is Footer.Hint -> {
-                val hint = fitOneLine(footer.text, BODY_WIDTH)
-                output.add(row(FOOTER_ROW, hint, BODY_X + (BODY_WIDTH - hint.width) / 2, hintInk))
-            }
-            is Footer.Timer -> {
-                output.add(bar(BODY_X, BODY_WIDTH, timerTrack))
-                val filled = (BODY_WIDTH * footer.fraction.coerceIn(0.0, 1.0)).toInt()
-                if (filled > 0) output.add(bar(BODY_X, filled, timerInk))
-            }
-            Footer.None -> {}
+        footer.hint?.let {
+            val hint = fitOneLine(it, BODY_WIDTH)
+            output.add(row(FOOTER_ROW, hint, BODY_X + (BODY_WIDTH - hint.width) / 2, hintInk))
+        }
+        footer.timer?.let {
+            output.add(bar(BODY_X, BODY_WIDTH, timerTrack))
+            val filled = (BODY_WIDTH * it.coerceIn(0.0, 1.0)).toInt()
+            if (filled > 0) output.add(bar(BODY_X, filled, timerInk))
         }
         if (page.count > 1) {
             val marker = fitOneLine(Component.text("${page.index + 1}/${page.count}", hintInk), 40)
@@ -146,7 +144,7 @@ internal object SubtitleHudRenderer {
         var remaining = width.coerceIn(0, 511)
         if (remaining == 0) return Component.empty()
         val parts = mutableListOf(spacing(x))
-        val style = Style.style().font(rowFonts[FOOTER_ROW]).color(color).shadowColor(ShadowColor.none()).build()
+        val style = Style.style().font(rowFonts[BAR_ROW]).color(color).shadowColor(ShadowColor.none()).build()
         while (remaining > 0) {
             val bit = (31 - Integer.numberOfLeadingZeros(remaining)).coerceAtMost(8)
             // Every bitmap glyph advances its width + 1 px of spacing; pull that pixel back right away so the

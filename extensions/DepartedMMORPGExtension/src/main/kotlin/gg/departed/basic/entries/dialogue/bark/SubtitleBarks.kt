@@ -116,7 +116,7 @@ object SubtitleBarks {
                 speaker = bark.speaker,
                 body = bark.body.asMini(),
                 revealedCharacters = revealed,
-                footer = SubtitleHudRenderer.Footer.Timer(fraction),
+                footer = SubtitleHudRenderer.Footer(timer = fraction),
                 centered = false,
                 trailing = passthrough,
             ))

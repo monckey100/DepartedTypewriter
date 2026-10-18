@@ -81,7 +81,7 @@ class SubtitleCinematicEntry(
 val subtitleMillisPerCharacter: Int by snippet("cinematic.subtitle.millisPerCharacter", 40)
 /** Presses closer together than this are ignored, so a double tap never skips a line unread. */
 val subtitleGraceMillis: Long by snippet("cinematic.subtitle.graceMillis", 250L)
-private val subtitleHintNext: String by snippet("cinematic.subtitle.hint.next", "<gold>Jump / Shift</gold><gray> next line</gray>")
+private val subtitleHintNext: String by snippet("cinematic.subtitle.hint.next", "<gold>Jump / Shift</gold><gray> skip line</gray>")
 private val subtitleHintComplete: String by snippet("cinematic.subtitle.hint.complete", "<gold>Jump / Shift</gold><gray> show full line</gray>")
 
 class SubtitleCinematicAction(
@@ -144,11 +144,12 @@ class SubtitleCinematicAction(
         // Typing: redraw every frame. Otherwise redraw when the bar moves a pixel, and at least every half
         // second (the client fades an action bar out after three seconds).
         if (complete && revealed == lastRevealed && barPixels == lastBarPixels && frame - lastRenderFrame < 10) return
+        val hint = if (!entry.allowSkip) null else (if (complete) subtitleHintNext else subtitleHintComplete).asMini()
         player.showDialogueHud(SubtitleHudRenderer.render(
             speaker = speakerName().asMini(),
             body = body.asMini(),
             revealedCharacters = revealed,
-            footer = SubtitleHudRenderer.Footer.Timer(fraction),
+            footer = SubtitleHudRenderer.Footer(hint = hint, timer = fraction),
             centered = entry.centered,
         ))
         lastRevealed = revealed
