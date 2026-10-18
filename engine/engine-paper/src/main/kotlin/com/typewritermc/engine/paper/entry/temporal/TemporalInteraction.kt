@@ -83,7 +83,15 @@ class TemporalInteraction(
 
     override suspend fun tick(deltaTime: Duration) {
         if (state != PLAYING) return
-        if (canEnd) return
+        if (canEnd) {
+            // The clock was moved past the last frame between ticks (TemporalSetFrameTrigger): still end the
+            // cinematic, once. Without this the interaction would idle here forever.
+            if (!stopRequested) {
+                stopRequested = true
+                TemporalStopTrigger.triggerFor(player, context)
+            }
+            return
+        }
 
         // Make sure that the first frame is 0
         if (playTime.isNegative) playTime = Duration.ZERO
@@ -102,12 +110,15 @@ class TemporalInteraction(
         }
         AsyncCinematicTickEvent(player, frame).callEvent()
 
-        if (canEnd) {
+        if (canEnd && !stopRequested) {
+            stopRequested = true
             TemporalStopTrigger.triggerFor(player, context)
         }
     }
 
     private val canEnd get() = actions.all { it.canFinish(frame) }
+    /** The stop trigger has been fired for this interaction; it must not fire twice (the page triggers would double). */
+    private var stopRequested = false
 
     override suspend fun teardown() {
         if (state != PLAYING) return

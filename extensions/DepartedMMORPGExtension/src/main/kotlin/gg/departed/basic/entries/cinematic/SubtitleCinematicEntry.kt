@@ -214,7 +214,10 @@ class SubtitleCinematicAction(
 
     private fun jumpToNextLine(segment: MultiLineDisplayDialogueSegment, frame: Int) {
         val next = segments.filter { it.startFrame > segment.startFrame }.minByOrNull { it.startFrame }
-        val target = next?.startFrame ?: (segment.endFrame + 1)
+        // Last line: land ON its end frame, never past it. The engine only fires the stop trigger at the end of
+        // a tick it ran, and skips ticks whose frame already lets every action finish, so a clock set beyond the
+        // last frame of the page stalls the cinematic forever (fishing / farming tutorial got stuck this way).
+        val target = next?.startFrame ?: segment.endFrame
         if (target <= frame) return
         val context = player.interactionContext ?: return
         TemporalSetFrameTrigger(target).triggerFor(player, context)
