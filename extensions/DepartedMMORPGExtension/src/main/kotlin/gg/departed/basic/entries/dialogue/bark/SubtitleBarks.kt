@@ -42,7 +42,11 @@ import java.util.concurrent.ConcurrentHashMap
  * without input, and dismisses on its own. Replaces `speak{chat=true}` chat copies and other chat dialogue.
  *
  * - The line types out at the subtitle pace, then holds for [Bark.holdMillis] with a draining timer bar.
- * - A newer bark for the same player replaces the current one.
+ * - Owner 2026-10-22: story is never cut. A STORY line (the default) that arrives while another story line is
+ *   pending or on screen QUEUES behind it and plays when it ends, in order. An ATTACK line (`dsay p:0`, a mob's
+ *   attack shout) is dropped while story is up, and replaces only another attack line. A story line replaces
+ *   an attack line. A line with a HIGHER priority than the one showing (`p:2`) cuts in at once: a deliberate
+ *   interruption (someone talking over someone); the queue behind it is kept.
  * - While the player is inside a Typewriter interaction (conversation or cinematic) the bark waits, and shows
  *   once they are free if it is still fresh (under [PENDING_MILLIS]); the conversation owns the action bar.
  * - Other plugins' action-bar text (kill counters, countdowns) is not lost: it is captured and drawn in its
@@ -53,7 +57,12 @@ object SubtitleBarks {
     private const val FOREIGN_MILLIS = 3_000L
     private const val IDLE_RESEND_TICKS = 10
 
-    class Bark(val speaker: Component, val body: String, val holdMillis: Long) {
+    /** Story / dialogue: the default. Replaces anything. */
+    const val STORY = 1
+    /** A mob's attack shout: dropped while a story line is pending or showing. */
+    const val ATTACK = 0
+
+    class Bark(val speaker: Component, val body: String, val holdMillis: Long, val priority: Int = STORY) {
         val plain: String = body.stripped()
         val characters: Int = plain.codePointCount(0, plain.length)
         val typingMillis: Long = characters.toLong() * subtitleMillisPerCharacter
@@ -66,19 +75,48 @@ object SubtitleBarks {
 
     private class Foreign(val component: Component, val at: Long)
 
+    private const val QUEUE_LIMIT = 8
+
     private val barks = ConcurrentHashMap<UUID, Bark>()
+    /** Story lines waiting behind the current one, oldest first. */
+    private val queued = ConcurrentHashMap<UUID, java.util.ArrayDeque<Bark>>()
     private val foreign = ConcurrentHashMap<UUID, Foreign>()
     private var tick = 0
 
-    fun show(player: Player, speaker: Component, body: String, holdMillis: Long) {
+    /** @return false when the line was dropped (an attack line while story is up). */
+    fun show(player: Player, speaker: Component, body: String, holdMillis: Long, priority: Int = STORY): Boolean {
+        val uuid = player.uniqueId
+        val bark = Bark(speaker, body, holdMillis.coerceAtLeast(500L), priority)
+        val current = barks[uuid]
+        val storyUp = current != null && current.priority >= STORY
+        if (priority < STORY && (storyUp || queued[uuid]?.isNotEmpty() == true)) return false
         StoryLog.record(player, net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(speaker), body)
-        barks[player.uniqueId] = Bark(speaker, body, holdMillis.coerceAtLeast(500L))
+        // a HIGHER priority cuts in (a deliberate interruption, e.g. `p:2` talking over someone mid-word)
+        if (priority >= STORY && storyUp && priority <= current!!.priority) {
+            val q = queued.computeIfAbsent(uuid) { java.util.ArrayDeque() }
+            if (q.size >= QUEUE_LIMIT) q.pollFirst()
+            q.addLast(bark)
+            return true
+        }
+        barks[uuid] = bark
+        return true
+    }
+
+    /** The current line is done: the next queued story line takes the band (stale ones are skipped). */
+    private fun next(uuid: UUID): Boolean {
+        val q = queued[uuid] ?: return false
+        val now = System.currentTimeMillis()
+        while (true) {
+            val bark = q.pollFirst() ?: run { queued.remove(uuid); return false }
+            if (now - bark.createdAt <= PENDING_MILLIS) { barks[uuid] = bark; return true }
+        }
     }
 
     fun isActive(uuid: UUID): Boolean = barks[uuid]?.startedAt?.let { it >= 0 } == true
 
     fun remove(uuid: UUID) {
         barks.remove(uuid)
+        queued.remove(uuid)
         foreign.remove(uuid)
     }
 
@@ -94,7 +132,7 @@ object SubtitleBarks {
             val player = Bukkit.getPlayer(uuid)
             if (player == null || !player.isOnline) { remove(uuid); continue }
             if (bark.startedAt < 0) {
-                if (now - bark.createdAt > PENDING_MILLIS) { remove(uuid); continue }
+                if (now - bark.createdAt > PENDING_MILLIS) { barks.remove(uuid); next(uuid); continue }
                 // Conversations (dialogue mount held) and cinematics own the action bar; wait until free.
                 if (player.isPlayingTemporal() || DialogueMountControl.heldStand(player) != null) continue
                 bark.startedAt = now
@@ -102,8 +140,11 @@ object SubtitleBarks {
             val elapsed = now - bark.startedAt
             val total = bark.typingMillis + bark.holdMillis
             if (elapsed >= total) {
-                remove(uuid)
-                player.sendActionBar(Component.empty().font(Key.key("departed:dialogue/space")))
+                barks.remove(uuid)
+                if (!next(uuid)) {
+                    foreign.remove(uuid)
+                    player.sendActionBar(Component.empty().font(Key.key("departed:dialogue/space")))
+                }
                 continue
             }
             val complete = elapsed >= bark.typingMillis
@@ -181,7 +222,8 @@ class SubtitleBarkService : Initializable, Listener {
 }
 
 /**
- * `dsay <player> <holdSeconds> <speaker> <text...>` - show an auto-dismissing subtitle line.
+ * `dsay <player> [p:<priority>] <holdSeconds> <speaker> <text...>` - show an auto-dismissing subtitle line.
+ * `p:0` marks a mob's attack shout: it never cuts a story line (no `p:`, priority 1) that is still showing.
  * `speaker` is one token: `_` becomes a space, `&` codes or MiniMessage set its colour (`&4&lPólemos`,
  * `Traumatized_Villager`, `-` for narration with no name), or `[words with spaces]` (e.g. `[<caster.name>]`).
  * `text` is the rest of the line.
@@ -189,11 +231,14 @@ class SubtitleBarkService : Initializable, Listener {
 private class DsayCommand : Command("dsay") {
     init {
         description = "Show an auto-dismissing subtitle line on the dialogue HUD band"
-        usage = "/dsay <player> <holdSeconds> <speaker> <text...>"
+        usage = "/dsay <player> [p:<priority>] <holdSeconds> <speaker> <text...>"
         permission = "departed.dsay"
     }
 
-    override fun execute(sender: CommandSender, label: String, args: Array<out String>): Boolean {
+    override fun execute(sender: CommandSender, label: String, raw: Array<out String>): Boolean {
+        // optional p:<priority> right after the player
+        val priority = raw.getOrNull(1)?.takeIf { it.startsWith("p:", ignoreCase = true) }?.substring(2)?.toIntOrNull()
+        val args: List<String> = if (priority != null) raw.toList().filterIndexed { i, _ -> i != 1 } else raw.toList()
         if (args.size < 4) {
             sender.sendMessage(usage)
             return true
@@ -226,7 +271,7 @@ private class DsayCommand : Command("dsay") {
             // Normalise legacy colours to MiniMessage so the renderer sees one format.
             net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(SubtitleBarks.parseText(text))
         } else text
-        SubtitleBarks.show(player, speaker, body, (hold * 1000).toLong())
+        SubtitleBarks.show(player, speaker, body, (hold * 1000).toLong(), priority ?: SubtitleBarks.STORY)
         return true
     }
 }
