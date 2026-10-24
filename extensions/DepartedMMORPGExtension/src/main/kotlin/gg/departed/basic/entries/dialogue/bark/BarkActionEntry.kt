@@ -56,6 +56,8 @@ class BarkActionEntry(
     val voice: Var<String> = ConstVar(""),
     @Help("Voice Text, if empty it will use the regular text.")
     val voicetext: Var<String> = ConstVar(""),
+    @Help("Bark priority. 1 = story (default): queues behind a story line that is still showing. 2+ cuts in at once (a timed call, someone talking over someone). 0 = attack shout, dropped while story is up.")
+    val priority: Var<Int> = ConstVar(SubtitleBarks.STORY),
 ) : ActionEntry {
     override fun ActionTrigger.execute() {
         val linked = speaker.get()?.displayName?.get(player)
@@ -67,8 +69,9 @@ class BarkActionEntry(
         val voiceActor = voice.get(player)
         val line = DepartedLang.voice(player, voicetext.get(player), source, local).parsePlaceholders(player).stripped()
         val holdMillis = hold.get(player).toMillis()
+        val prio = priority.get(player)
         Dispatchers.Sync.launch {
-            SubtitleBarks.show(player, name.asMini(), body, holdMillis)
+            SubtitleBarks.show(player, name.asMini(), body, holdMillis, prio)
             if (!voiceActor.isNullOrBlank() && line.isNotBlank()) {
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "talkchar -follow $voiceActor ${player.name} $line")
             }
