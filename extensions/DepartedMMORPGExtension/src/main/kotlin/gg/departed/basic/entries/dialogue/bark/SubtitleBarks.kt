@@ -46,7 +46,8 @@ import java.util.concurrent.ConcurrentHashMap
  *   pending or on screen QUEUES behind it and plays when it ends, in order. An ATTACK line (`dsay p:0`, a mob's
  *   attack shout) is dropped while story is up, and replaces only another attack line. A story line replaces
  *   an attack line. A line with a HIGHER priority than the one showing (`p:2`) cuts in at once: a deliberate
- *   interruption (someone talking over someone); the queue behind it is kept.
+ *   interruption (someone talking over someone); the queue behind it is kept. Two interruptions of the SAME
+ *   priority (p:2 over p:2) also replace each other (timed call chains); only equal story lines queue.
  * - While the player is inside a Typewriter interaction (conversation or cinematic) the bark waits, and shows
  *   once they are free if it is still fresh (under [PENDING_MILLIS]); the conversation owns the action bar.
  * - Other plugins' action-bar text (kill counters, countdowns) is not lost: it is captured and drawn in its
@@ -91,8 +92,11 @@ object SubtitleBarks {
         val storyUp = current != null && current.priority >= STORY
         if (priority < STORY && (storyUp || queued[uuid]?.isNotEmpty() == true)) return false
         StoryLog.record(player, net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(speaker), body)
-        // a HIGHER priority cuts in (a deliberate interruption, e.g. `p:2` talking over someone mid-word)
-        if (priority >= STORY && storyUp && priority <= current!!.priority) {
+        // A HIGHER priority cuts in (a deliberate interruption, e.g. `p:2` talking over someone mid-word).
+        // Equal STORY lines queue; equal interruptions (p:2 over p:2) replace each other: a timed call chain
+        // (quest 66's dance, hold 7 s per call) must show each new call at once, not after the previous hold
+        // (2026-10-25: Asmed saw every hint only as its window closed, the chain was unpassable again).
+        if (priority >= STORY && storyUp && (priority < current!!.priority || (priority == current.priority && priority == STORY))) {
             val q = queued.computeIfAbsent(uuid) { java.util.ArrayDeque() }
             if (q.size >= QUEUE_LIMIT) q.pollFirst()
             q.addLast(bark)
