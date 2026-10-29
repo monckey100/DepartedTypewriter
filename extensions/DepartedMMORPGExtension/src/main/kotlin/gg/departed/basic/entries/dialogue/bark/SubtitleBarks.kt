@@ -208,7 +208,15 @@ class SubtitleBarkService : Initializable, Listener {
             }
         }
         PacketEvents.getAPI().eventManager.registerListener(passthrough!!)
-        command = DsayCommand().also { Bukkit.getCommandMap().register("departed", it) }
+        val commandMap = Bukkit.getCommandMap()
+        val staleCommands = commandMap.knownCommands.values
+            .filter { it.javaClass.name == DsayCommand::class.java.name }
+            .distinct()
+        staleCommands.forEach { stale ->
+            commandMap.knownCommands.entries.removeIf { it.value === stale }
+            stale.unregister(commandMap)
+        }
+        command = DsayCommand().also { commandMap.register("departed", it) }
     }
 
     override suspend fun shutdown() {
@@ -216,7 +224,11 @@ class SubtitleBarkService : Initializable, Listener {
         task = null
         passthrough?.let { runCatching { PacketEvents.getAPI().eventManager.unregisterListener(it) } }
         passthrough = null
-        command?.let { runCatching { it.unregister(Bukkit.getCommandMap()) } }
+        command?.let { current ->
+            val commandMap = Bukkit.getCommandMap()
+            commandMap.knownCommands.entries.removeIf { it.value === current }
+            current.unregister(commandMap)
+        }
         command = null
         HandlerList.unregisterAll(this)
     }
