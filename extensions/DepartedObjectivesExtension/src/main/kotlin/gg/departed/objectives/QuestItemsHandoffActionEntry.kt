@@ -12,6 +12,8 @@ import com.typewritermc.engine.paper.entry.entries.ActionEntry
 import com.typewritermc.engine.paper.entry.entries.ActionTrigger
 import com.typewritermc.engine.paper.entry.matches
 import com.typewritermc.engine.paper.utils.Sync
+import com.typewritermc.engine.paper.utils.plainText
+import com.typewritermc.engine.paper.utils.stripped
 import dev.departed.itemcore.api.ItemCore
 import dev.departed.itemcore.api.item.ItemId
 import dev.departed.itemcore.api.item.ItemQuery
@@ -40,7 +42,7 @@ class QuestItemsHandoffActionEntry(
                 return@launch
             }
             val requested = runCatching {
-                requirements.map { Requirement(ItemQuery.id(ItemId.of(it.itemId)), it.amount) }
+                requirements.map { Requirement(it.query(), it.amount) }
             }.getOrNull()
             if (requested == null) {
                 failureTriggers.triggerFor(player)
@@ -59,5 +61,14 @@ class QuestItemsHandoffActionEntry(
     }
 }
 
-/** Exact ItemCore identity and required units for a mixed quest delivery. */
-data class QuestHandoffRequirement(val itemId: String = "", val amount: Int = 1)
+/**
+ * Required units for a mixed quest delivery: an exact ItemCore [itemId], or, when [name] is set, any item whose plain
+ * display name equals it (dynamic items such as brewed potions have no catalog id).
+ */
+data class QuestHandoffRequirement(val itemId: String = "", val amount: Int = 1, val name: String = "") {
+    fun query(): ItemQuery {
+        if (name.isBlank()) return ItemQuery.id(ItemId.of(itemId))
+        val wanted = name.stripped()
+        return ItemQuery(null, null, null) { it.stack()?.effectiveName()?.plainText() == wanted }
+    }
+}
