@@ -1,5 +1,6 @@
 package gg.departed.objectives
 
+import com.typewritermc.basic.itemcore.CoreItemQueries
 import com.typewritermc.basic.itemcore.ItemCoreBridge
 import com.typewritermc.core.books.pages.Colors
 import com.typewritermc.core.entries.Ref
@@ -12,8 +13,6 @@ import com.typewritermc.engine.paper.entry.entries.ActionEntry
 import com.typewritermc.engine.paper.entry.entries.ActionTrigger
 import com.typewritermc.engine.paper.entry.matches
 import com.typewritermc.engine.paper.utils.Sync
-import com.typewritermc.engine.paper.utils.plainText
-import com.typewritermc.engine.paper.utils.stripped
 import dev.departed.itemcore.api.ItemCore
 import dev.departed.itemcore.api.item.ItemId
 import dev.departed.itemcore.api.item.ItemQuery
@@ -68,7 +67,6 @@ class QuestItemsHandoffActionEntry(
 data class QuestHandoffRequirement(val itemId: String = "", val amount: Int = 1, val name: String = "") {
     fun query(): ItemQuery {
         if (name.isBlank()) return ItemQuery.id(ItemId.of(itemId))
-        val wanted = name.stripped()
-        return ItemQuery(null, null, null) { it.stack()?.effectiveName()?.plainText() == wanted }
+        return CoreItemQueries.named(name)
     }
 }

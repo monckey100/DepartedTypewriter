@@ -2,13 +2,17 @@ package com.typewritermc.basic.itemcore
 
 import com.typewritermc.core.interaction.InteractionContext
 import com.typewritermc.engine.paper.entry.entries.get
+import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
 import com.typewritermc.engine.paper.logger
+import com.typewritermc.engine.paper.utils.plainText
+import com.typewritermc.engine.paper.utils.stripped
 import com.typewritermc.engine.paper.utils.item.CustomItem
 import com.typewritermc.engine.paper.utils.item.Item
 import com.typewritermc.engine.paper.utils.item.SerializedItem
 import com.typewritermc.engine.paper.utils.item.components.ItemAmountComponent
 import com.typewritermc.engine.paper.utils.item.components.ItemComponent
 import com.typewritermc.engine.paper.utils.item.components.ItemMaterialComponent
+import com.typewritermc.engine.paper.utils.item.components.ItemNameComponent
 import com.typewritermc.engine.paper.utils.item.components.ItemPDCComponent
 import com.typewritermc.engine.paper.utils.item.components.pdcTypes.BooleanPdcData
 import com.typewritermc.engine.paper.utils.item.components.pdcTypes.BytePdcData
@@ -35,7 +39,8 @@ import java.util.concurrent.ConcurrentHashMap
  *   `dish/` family and its `dish.*` state, `departedcooking:potion`/`potion_id` = the `potion/` family. Once a
  *   matcher names an identity, its material component is ignored (the type decides the look).
  * - A PDC key the core does not re-home never matches a canonical stack (it cannot carry it) and logs once.
- * - Every other component (material, item name, lore, model, ...) is checked against the stack as before.
+ * - Item names use the core presentation; the stored canonical stack can carry a generic blueprint name.
+ * - Every other component (material, lore, model, ...) is checked against the stack as before.
  * - The amount component is never part of the match; callers read it as the quantity.
  */
 object CoreItemQueries {
@@ -49,6 +54,23 @@ object CoreItemQueries {
     fun of(player: Player?, item: Item, context: InteractionContext?): ItemQuery = when (item) {
         is SerializedItem -> serialized(player, item, context)
         is CustomItem -> custom(player, item, context)
+    }
+
+    /** Exact plain name in the server's default presentation, including state-derived brewed potion names. */
+    fun named(name: String): ItemQuery {
+        val wanted = name.stripped()
+        return ItemQuery(null, null, null) { matchesName(it, wanted) }
+    }
+
+    private fun matchesName(view: ItemView, wanted: String): Boolean {
+        val stack = view.stack() ?: return false
+        val name = if (view.canonical()) {
+            val presentation = ItemCore.get().presentation()
+            presentation.render(stack, presentation.anonymous()).name()
+        } else {
+            stack.effectiveName()
+        }
+        return name.plainText() == wanted
     }
 
     private fun serialized(player: Player?, item: SerializedItem, context: InteractionContext?): ItemQuery {
@@ -89,7 +111,14 @@ object CoreItemQueries {
         view: ItemView,
     ): Boolean {
         val stack = view.stack() ?: return false
-        return checks.all { it.matches(player, context, stack) }
+        return checks.all { component ->
+            if (component is ItemNameComponent) {
+                val wanted = component.name.get(player, context)?.parsePlaceholders(player)?.stripped()
+                wanted != null && matchesName(view, wanted)
+            } else {
+                component.matches(player, context, stack)
+            }
+        }
     }
 
     private class LegacyCheck(val namesType: Boolean, val check: (ItemView) -> Boolean)
