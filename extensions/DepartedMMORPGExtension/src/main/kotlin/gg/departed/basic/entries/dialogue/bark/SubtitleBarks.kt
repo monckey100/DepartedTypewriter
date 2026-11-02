@@ -91,7 +91,9 @@ object SubtitleBarks {
         val current = barks[uuid]
         val storyUp = current != null && current.priority >= STORY
         if (priority < STORY && (storyUp || queued[uuid]?.isNotEmpty() == true)) return false
-        StoryLog.record(player, net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(speaker), body)
+        val speakerMini = net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(speaker)
+        StoryLog.record(player, speakerMini, body)
+        if (priority >= STORY) StoryLog.showInAll(player, speakerMini, body)
         // A HIGHER priority cuts in (a deliberate interruption, e.g. `p:2` talking over someone mid-word).
         // Equal STORY lines queue; equal interruptions (p:2 over p:2) replace each other: a timed call chain
         // (quest 66's dance, hold 7 s per call) must show each new call at once, not after the previous hold
