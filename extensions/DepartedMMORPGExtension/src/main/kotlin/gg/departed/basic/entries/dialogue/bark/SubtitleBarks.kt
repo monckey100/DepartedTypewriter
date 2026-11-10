@@ -211,13 +211,10 @@ class SubtitleBarkService : Initializable, Listener {
         }
         PacketEvents.getAPI().eventManager.registerListener(passthrough!!)
         val commandMap = Bukkit.getCommandMap()
-        val staleCommands = commandMap.knownCommands.values
-            .filter { it.javaClass.name == DsayCommand::class.java.name }
-            .distinct()
-        staleCommands.forEach { stale ->
-            commandMap.knownCommands.entries.removeIf { it.value === stale }
-            stale.unregister(commandMap)
-        }
+        // A reload loads this class again: the previous `dsay` (same class NAME, older class) must go, or it keeps
+        // feeding the old SubtitleBarks object that nothing ticks any more (2026-11-10: no bark showed after
+        // `/tw reload`). Paper's known-commands map refuses removal through its entry set ("remove"), so drop by key.
+        dropCommands(commandMap) { it.javaClass.name == DsayCommand::class.java.name }
         command = DsayCommand().also { commandMap.register("departed", it) }
     }
 
@@ -226,13 +223,20 @@ class SubtitleBarkService : Initializable, Listener {
         task = null
         passthrough?.let { runCatching { PacketEvents.getAPI().eventManager.unregisterListener(it) } }
         passthrough = null
-        command?.let { current ->
-            val commandMap = Bukkit.getCommandMap()
-            commandMap.knownCommands.entries.removeIf { it.value === current }
-            current.unregister(commandMap)
-        }
+        command?.let { current -> dropCommands(Bukkit.getCommandMap()) { it === current } }
         command = null
         HandlerList.unregisterAll(this)
+    }
+
+    /** Removes every matching command from the map, key by key; a failure never aborts the caller. */
+    private fun dropCommands(commandMap: org.bukkit.command.CommandMap, match: (Command) -> Boolean) {
+        val known = commandMap.knownCommands
+        val keys = known.entries.filter { match(it.value) }.map { it.key to it.value }
+        for ((key, stale) in keys) {
+            runCatching { known.remove(key) }
+                .onFailure { plugin.logger.warning("dsay: could not drop the old command '$key': ${it.message}") }
+            runCatching { stale.unregister(commandMap) }
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
