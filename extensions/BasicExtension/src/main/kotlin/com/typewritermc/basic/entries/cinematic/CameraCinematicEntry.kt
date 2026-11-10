@@ -188,37 +188,74 @@ class CameraCinematicAction(
         val segment = (entry.segments activeSegmentAt frame)
 
         if (segment != previousSegment) {
+            // Commit the change BEFORE running it. If the camera action throws (2026-11-10: a
+            // tutorial boss intro whose first segment had over-long path durations), a late
+            // assignment left previousSegment null, so the next tick ran player.setup() again and
+            // overwrote the first listener + packet interceptor without releasing them: the player
+            // could no longer be damaged or targeted and could not interact, until a restart.
+            val previous = previousSegment
+            previousSegment = segment
+
             // Record the world this segment's camera lives in BEFORE the action teleports the
             // player there, so the PlayerChangedWorldEvent safety net can recognise our own move.
             if (segment != null) {
                 cameraWorldUid = segment.path.firstOrNull()?.location?.get(player)?.world
                     ?.let { runCatching { UUID.fromString(it.identifier) }.getOrNull() }
             }
-            if (previousSegment == null && segment != null) {
+            if (previous == null && segment != null) {
                 player.setup()
-                action.startSegment(segment)
+                camera("start") { action.startSegment(segment) }
             } else if (segment != null) {
-                action.switchSegment(segment)
+                camera("switch") { action.switchSegment(segment) }
             } else {
-                action.stop()
+                stopCamera()
                 player.teardown()
             }
-
-            previousSegment = segment
         }
 
         if (segment != null) {
             val baseFrame = frame - segment.startFrame
             if (abs(frame - lastFrame) > 5 && baseFrame > 0) {
-                action.skipToFrame(baseFrame)
+                camera("skip") { action.skipToFrame(baseFrame) }
             } else {
-                action.tickSegment(baseFrame)
+                camera("tick") { action.tickSegment(baseFrame) }
             }
         }
         lastFrame = frame
     }
 
+    // A camera that fails stays off for the rest of this cinematic: one log line instead of an
+    // exception every tick. Everything else (the other entries, the player state restore at the
+    // end) carries on, so a bad camera can only cost the picture.
+    private var cameraFailed = false
+
+    private suspend fun camera(step: String, block: suspend () -> Unit) {
+        if (cameraFailed) return
+        try {
+            block()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            cameraFailed = true
+            logger.severe("Camera cinematic '${entry.name}' (${entry.id}) failed on $step for ${player.name}; the camera is off for the rest of this cinematic: $e")
+        }
+    }
+
+    private suspend fun stopCamera() {
+        try {
+            action.stop()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.severe("Camera cinematic '${entry.name}' (${entry.id}) failed to stop its camera for ${player.name}: $e")
+        }
+    }
+
     private suspend fun Player.setup() {
+        // Never set up twice without a teardown in between: the second run would overwrite the
+        // listener and the packet interceptor and leak the first pair on the player.
+        if (listener != null || interceptor != null) return
+
         // Because we are teleporting the player away,
         // we don't want to quit the temporal interaction because we went out of bounds.
         if (boundStateSubscription == null) {
@@ -426,7 +463,7 @@ class CameraCinematicAction(
 
     override suspend fun teardown() {
         super.teardown()
-        action.stop()
+        stopCamera()
         player.teardown()
     }
 
@@ -708,15 +745,25 @@ private fun List<PathPoint>.transform(
     }
 
 
-    val allocatedDuration = sumOf { it.duration.orElse(0) }
-    if (allocatedDuration > totalDuration) {
-        throw IllegalArgumentException("The total duration of the path points is greater than the total duration of the cinematic.")
+    // Path durations that add up to more than the segment has (its length minus the camera's
+    // BASE_INTERPOLATION lead) used to throw here, which killed the camera. Fit them instead:
+    // every authored duration is scaled down by the same factor, so the move keeps its shape and
+    // just plays slightly faster (owner 2026-11-10: "have typewriter fix it instead of fail").
+    val budget = totalDuration.coerceAtLeast(0)
+    val authoredDuration = sumOf { it.duration.orElse(0) }
+    val fit = if (authoredDuration > budget) budget.toDouble() / authoredDuration else 1.0
+    if (fit < 1.0) {
+        logger.warning("Camera path durations add up to $authoredDuration frames but the segment only has $budget (segment length - $BASE_INTERPOLATION). Scaled them to fit; shorten the path durations or lengthen the segment.")
     }
+    val durations: List<Optional<Int>> = map { point ->
+        if (fit < 1.0 && point.duration.isPresent) Optional.of((point.duration.get() * fit).toInt()) else point.duration
+    }
+    val allocatedDuration = durations.sumOf { it.orElse(0) }
 
-    val remainingDuration = totalDuration - allocatedDuration
+    val remainingDuration = budget - allocatedDuration
 
     // The last segment should never have a duration. As the last segment will be reached when the cinematic ends.
-    val leftSegments = take(size - 1).count { it.duration.isEmpty }
+    val leftSegments = durations.take(size - 1).count { it.isEmpty }
 
     if (leftSegments == 0) {
         if (remainingDuration > 0) {
@@ -724,8 +771,8 @@ private fun List<PathPoint>.transform(
         }
 
         var currentFrame = 0
-        return map {
-            val endFrame = currentFrame + it.duration.orElse(0)
+        return mapIndexed { index, it ->
+            val endFrame = currentFrame + durations[index].orElse(0)
             val segment = PointSegment(
                 currentFrame,
                 endFrame,
@@ -741,8 +788,8 @@ private fun List<PathPoint>.transform(
 
     var currentFrame = 0
 
-    return map { pathPoint ->
-        val duration = pathPoint.duration.orElseGet {
+    return mapIndexed { index, pathPoint ->
+        val duration = durations[index].orElseGet {
             if (leftOverDuration > 0) {
                 leftOverDuration--
                 durationPerSegment + 1
