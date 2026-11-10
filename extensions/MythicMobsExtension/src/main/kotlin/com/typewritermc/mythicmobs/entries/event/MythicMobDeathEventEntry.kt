@@ -30,12 +30,16 @@ class MythicMobDeathEventEntry(
     @Help("Only trigger when a specific mob dies.")
     @Regex
     val mobName: String = "",
+    @Help("Only trigger when the mob's level is at least this (0 = any level). The MythicMobs level is the Departed mob level.")
+    val minLevel: Int = 0,
 ) : EventEntry
 
 @EntryListener(MythicMobDeathEventEntry::class)
 fun onMobDeath(event: MythicMobDeathEvent, query: Query<MythicMobDeathEventEntry>) {
     val player = event.killer as? Player ?: return
+    val level = event.mobLevel
     query.findWhere {
-        it.mobName.toRegex(RegexOption.IGNORE_CASE).matches(event.mobType.internalName)
+        (it.minLevel <= 0 || level >= it.minLevel) &&
+            it.mobName.toRegex(RegexOption.IGNORE_CASE).matches(event.mobType.internalName)
     }.triggerAllFor(player, context())
 }
