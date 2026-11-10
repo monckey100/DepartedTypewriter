@@ -35,12 +35,20 @@ class DepartedObjectiveManager : Initializable {
         progress.clear()
     }
 
+    /**
+     * Progress belongs to the CHARACTER, not the account. Keyed on the player alone, a boss killed on
+     * one character stayed "done" for the next one made in the same server session: the tutorial's
+     * second run opened on "Speak with Benny in Lumbridge" (owner 2026-11-10). While DepartedRPG has
+     * no profile loaded yet the player's own UUID stands in.
+     */
+    private fun progressKey(player: Player): UUID = DepartedRpgBridge.profileUuid(player) ?: player.uniqueId
+
     fun progress(player: Player, objective: DepartedObjectiveEntry): Int {
-        return progress[player.uniqueId]?.get(objective.id)?.progress ?: 0
+        return progress[progressKey(player)]?.get(objective.id)?.progress ?: 0
     }
 
     fun isComplete(player: Player, objective: DepartedObjectiveEntry): Boolean {
-        val state = progress[player.uniqueId]?.get(objective.id) ?: return false
+        val state = progress[progressKey(player)]?.get(objective.id) ?: return false
         return state.completed || state.progress >= objective.targetAmount(player)
     }
 
@@ -75,7 +83,7 @@ class DepartedObjectiveManager : Initializable {
     ) {
         if (!isTracking(player, objective)) return
         val target = objective.targetAmount(player, context)
-        val playerProgress = progress.computeIfAbsent(player.uniqueId) { ConcurrentHashMap() }
+        val playerProgress = progress.computeIfAbsent(progressKey(player)) { ConcurrentHashMap() }
         val state = playerProgress.computeIfAbsent(objective.id) { ObjectiveProgress() }
         val clampedValue = min(max(0, value), target)
         syncQuestVariable(player, objective, clampedValue)
@@ -95,7 +103,7 @@ class DepartedObjectiveManager : Initializable {
      * regardless of quest status or timing, and idempotent.
      */
     fun waive(player: Player, objective: DepartedObjectiveEntry) {
-        val playerProgress = progress.computeIfAbsent(player.uniqueId) { ConcurrentHashMap() }
+        val playerProgress = progress.computeIfAbsent(progressKey(player)) { ConcurrentHashMap() }
         val state = playerProgress.computeIfAbsent(objective.id) { ObjectiveProgress() }
         if (state.completed) return
         state.progress = objective.targetAmount(player)

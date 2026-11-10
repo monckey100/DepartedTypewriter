@@ -12,6 +12,9 @@ object DepartedRpgBridge {
 
     fun currentQuestId(player: Player): String = api?.getCurrentQuestId(player)?.orElse("") ?: ""
 
+    /** The character (DepartedProfiles profile UUID) the player's loaded data belongs to; null while none is loaded. */
+    fun profileUuid(player: Player): java.util.UUID? = api?.getProfileUuid(player)?.orElse(null)
+
     /**
      * True when the player has this quest accepted and unfinished (WIP or TURN_IN).
      *
