@@ -9,11 +9,13 @@ import com.ticxo.modelengine.core.animation.handler.PriorityHandler
 import com.ticxo.modelengine.core.model.render.DisplayRendererImpl
 import org.bukkit.entity.Display
 import org.joml.Matrix4f
+import org.joml.Quaternionf
 import org.joml.Vector3f
 import java.util.IdentityHashMap
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 
 /**
  * Encodes only this clone's display transforms; its culling origins remain beside the viewer.
@@ -25,15 +27,22 @@ import kotlin.math.min
  * Framing: every tick the cubes of [geometry] are put through the bones' live matrices and the shader's view, so
  * the window is aimed at what the model looks like right now (see [DialogueModelFraming]) instead of at its
  * hitbox. The model's own scale does the zoom; the bones are moved so the framed point sits in the window's centre.
+ *
+ * Speech: the head and everything hanging from it nods about the head's pivot with the skin portraits' timing.
+ * It is done on the displays because ModelEngine only turns bones tagged as heads (h_), which most models lack.
  */
 internal class DialogueModelRenderer(
     private val activeModel: ActiveModel,
     private val geometry: DialogueModelGeometry?,
     private val track: DialoguePortraitTrack,
     private val tuning: DialoguePortraitTuning,
+    private val talking: () -> Boolean,
 ) : DisplayRendererImpl(activeModel) {
     private val unmarked = IdentityHashMap<DisplayBone, Vector3f>()
     private val unscaled = IdentityHashMap<DisplayBone, Vector3f>()
+    private val unturned = IdentityHashMap<DisplayBone, Quaternionf>()
+    private var headTop: ModelBone? = null
+    private var headBones: Set<String> = emptySet()
     private var enlarge = 1f
     private var frame: PortraitFrame? = null
     /** False until the bones have been posed at the framed scale: nothing is drawn unframed. */
@@ -41,6 +50,7 @@ internal class DialogueModelRenderer(
 
     override fun initialize() {
         enlarge = if (hasPlayerLimbs()) 1f else SCALE
+        findHead()
         super.initialize()
         place(activeModel.scale.y())
     }
@@ -49,8 +59,10 @@ internal class DialogueModelRenderer(
         if (!isInitialized) return
         unmarked.forEach { (bone, position) -> bone.position.set(Vector3f(position)) }
         unscaled.forEach { (bone, size) -> bone.scale.set(Vector3f(size)) }
+        unturned.forEach { (bone, turn) -> bone.leftRotation.set(Quaternionf(turn)) }
         unmarked.clear()
         unscaled.clear()
+        unturned.clear()
         super.readModelData()
         // The scale this tick's bones were posed with; reframe() may ask for another one for the next tick.
         val posedAt = activeModel.scale.y()
@@ -121,11 +133,23 @@ internal class DialogueModelRenderer(
                 .rotateY(-VIEW_YAW).rotateX(-VIEW_PITCH).mul(scale)
         }
         val marker = if (enlarge == 1f) MARKER else SCALED_MARKER
+        val yaw = pivot.yaw.get() ?: 0f
+        val head = headTop
+        // Where ModelEngine put the head's pivot, in the bones' own terms, and the nod about its ear-to-ear axis.
+        val neck = head?.let { Vector3f(it.globalTransform.position).rotateY(yaw).sub(raised) }
+        val nod = Vector3f(1f, 0f, 0f).rotateY(yaw).let { Quaternionf().rotationAxis(nodAngle(), it.x, it.y, it.z) }
         val bones = (spawnQueue.values + rendered.values).distinct()
         bones.forEach { bone ->
             val position = Vector3f(bone.position.get())
             unmarked[bone] = position
-            bone.position.set(Vector3f(position).add(raised).sub(centre).mul(enlarge).sub(raised).add(0f, marker, 0f))
+            val placed = Vector3f(position)
+            if (neck != null && bone.boneId in headBones) {
+                placed.sub(neck).rotate(nod).add(neck)
+                val turn = Quaternionf(bone.leftRotation.get())
+                unturned[bone] = turn
+                bone.leftRotation.set(Quaternionf(nod).mul(turn))
+            }
+            bone.position.set(placed.add(raised).sub(centre).mul(enlarge).sub(raised).add(0f, marker, 0f))
             val size = Vector3f(bone.scale.get())
             unscaled[bone] = size
             bone.scale.set(if (revealed) Vector3f(size).mul(enlarge) else Vector3f())
@@ -133,6 +157,24 @@ internal class DialogueModelRenderer(
             bone.brightness.set(0x00F000F0)
             bone.step.set(true)
         }
+    }
+
+    /** The skin portraits' head motion: a slow sway, and three quick nods per sway while speaking. */
+    private fun nodAngle(): Float {
+        val phase = (System.nanoTime() / 1.0e8 % 16.0 * Math.PI / 8.0).toFloat()
+        return if (talking()) sin(phase * 3f) * 0.065f else sin(phase) * 0.012f
+    }
+
+    private fun findHead() {
+        val top = geometry?.headTop?.let { id -> activeModel.bones.values.firstOrNull { it.blueprintBone.uuid == id } }
+            ?: return
+        val members = HashSet<ModelBone>()
+        fun collect(bone: ModelBone) {
+            if (members.add(bone)) bone.children.values.forEach(::collect)
+        }
+        collect(top)
+        headTop = top
+        headBones = activeModel.bones.filterValues { it in members }.keys.toSet()
     }
 
     private fun hasPlayerLimbs(): Boolean {

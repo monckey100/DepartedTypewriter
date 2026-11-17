@@ -20,7 +20,6 @@ import org.bukkit.scheduler.BukkitTask
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.sin
 
 /** Owns an independent, viewer-only ModelEngine clone without changing the NPC's shared model. */
 internal class DialogueModelPortrait(private val player: Player) {
@@ -32,7 +31,6 @@ internal class DialogueModelPortrait(private val player: Player) {
     private var modeled: ModeledEntity? = null
     private var updateTask: BukkitTask? = null
     private var worldId: UUID? = null
-    private var elapsedTicks = 0L
     private var yaw = 0f
 
     /** Resolve the existing blueprint and create a private preview. Call on the Bukkit main thread. */
@@ -71,6 +69,9 @@ internal class DialogueModelPortrait(private val player: Player) {
                 setForcedAlive(true)
                 setVisible(false)
                 syncLocation(anchor())
+                // ModelEngine's body follows the head from its own copy, which starts at 0: without this every
+                // line opened facing the wrong way and swung round to the facing half a second later.
+                bodyRotationController.yBodyRot = yaw
                 data.setBackCull(false)
                 data.setVerticalCull(false)
                 data.setBlockedCull(false)
@@ -83,7 +84,7 @@ internal class DialogueModelPortrait(private val player: Player) {
             clone.setBaseEntityVisible(false)
             val model = ModelEngineAPI.createActiveModel(
                 blueprint,
-                { active -> DialogueModelRenderer(active, geometry, track, tuning) },
+                { active -> DialogueModelRenderer(active, geometry, track, tuning) { talking } },
                 { active -> DialoguePortraitAnimationHandler(active) },
             )
             model.setScale(scale)
@@ -132,7 +133,6 @@ internal class DialogueModelPortrait(private val player: Player) {
         }
         val base = dummy ?: return
         base.syncLocation(anchor())
-        base.setXHeadRot(if (talking) (sin(elapsedTicks++ * 0.32) * 3.0).toFloat() else 0f)
     }
 
     private fun anchor(): Location = player.eyeLocation.clone().also {

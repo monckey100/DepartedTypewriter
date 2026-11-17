@@ -19,12 +19,11 @@ class DialogueModelFramingTest {
 
     @Test
     fun `a person is framed as a bust the size of the skin portraits`() {
-        // 16 wide, 32 tall, an 8 pixel head on top.
-        val frame = DialogueModelFraming.frame(PortraitSample(box(-8f, 0f, 8f, 32f), box(-4f, 24f, 4f, 32f)))
-        assertNear(23f * pixel, frame.side, "23 skin pixels across")
+        // 16 wide, 33 tall; the head, hat layer and turn included, measures 9.8 as the view sees it.
+        val frame = DialogueModelFraming.frame(PortraitSample(box(-8f, 0f, 8f, 33f), box(-4.9f, 23.2f, 4.9f, 33f)))
+        assertNear(2.35f * 9.8f * pixel, frame.side, "the skin portraits' 23 pixels across")
         assertNear(0f, frame.x, "centred on the head")
-        // 2.76 px of room above the head: the window's top edge is 0.12 sides over the head's top.
-        assertNear((32f + 0.12f * 23f - 11.5f) * pixel, frame.y, "head near the top")
+        assertNear((33f + 0.1f * 23.03f - 11.515f) * pixel, frame.y, "a tenth of the window above the head")
         assertTrue(frame.y - frame.side / 2f > 0f, "the legs are out of the shot")
     }
 
@@ -107,6 +106,7 @@ class DialogueModelFramingTest {
             {"uuid":"$body","children":["e-body",{"uuid":"$head","children":["e-head",{"uuid":"$hat","children":["e-hat"]}]}]}]}"""
         for (json in listOf(nested, listed)) {
             val geometry = DialogueModelGeometry.parse(Gson().fromJson(json, JsonObject::class.java))
+            assertEquals(head, geometry.headTop)
             assertEquals(setOf(head, hat), geometry.head)
             val corners = geometry.corners.getValue(body)
             assertEquals(24, corners.size)

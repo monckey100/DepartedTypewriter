@@ -21,7 +21,9 @@ import kotlin.math.sin
  */
 internal class DialogueModelGeometry(
     val corners: Map<UUID, FloatArray>,
-    /** The groups that make up the head (the shallowest group named like one, and everything under it). */
+    /** The group the head hangs from: the shallowest one named like a head that has cubes under it. */
+    val headTop: UUID?,
+    /** The groups with cubes that make up the head: [headTop] and everything under it. */
     val head: Set<UUID>,
     /** Changes whenever the file does, so framing measured on an older version is not reused. */
     val stamp: Long,
@@ -116,9 +118,9 @@ internal class DialogueModelGeometry(
             }
             // sortedBy is stable: among equally deep candidates the one listed first in the outliner wins.
             val head = heads.sortedBy { it.first }.asSequence()
-                .map { (_, top) -> corners.keys.filterTo(HashSet()) { under(it, top) } }
-                .firstOrNull { it.isNotEmpty() }.orEmpty()
-            return DialogueModelGeometry(corners, head, stamp)
+                .map { (_, top) -> top to corners.keys.filterTo(HashSet()) { under(it, top) } }
+                .firstOrNull { it.second.isNotEmpty() }
+            return DialogueModelGeometry(corners, head?.first, head?.second.orEmpty(), stamp)
         }
 
         /** The eight corners of a cube, turned about its own pivot, relative to its group's [origin]. */

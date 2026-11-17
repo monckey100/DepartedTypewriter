@@ -47,12 +47,15 @@ internal object DialogueModelFraming {
     const val BOX_BLOCKS = 96f / 46f
     /** How much of the window a whole body may fill; the rest is margin. */
     private const val FILL = 0.86f
-    /** A bust is this many heads across: the skin portraits' 23 skin pixels around an 8 pixel head. */
-    private const val BUST = 2.875f
+    /**
+     * A bust is this many heads across. The skin portraits show 23 skin pixels around a head that, hat layer
+     * included and turned the way the view sees it, measures about 9.8 - so a model's head comes out their size.
+     */
+    private const val BUST = 2.35f
     /** Hats, horns and crowns count as head; at most this much of a bust's window. */
     private const val HEAD_FILL = 0.9f
-    /** Room above the head in a bust, in window sides (the skin portraits' 2.8 of 23 pixels). */
-    private const val HEADROOM = 0.12f
+    /** Room above the head in a bust, in window sides (the skin portraits' 2.3 of 23 pixels). */
+    private const val HEADROOM = 0.1f
 
     /**
      * Aims at the head when that is a closer shot than the whole body - a person - and otherwise centres the
