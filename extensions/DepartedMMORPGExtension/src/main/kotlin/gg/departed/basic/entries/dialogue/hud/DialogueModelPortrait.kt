@@ -20,8 +20,6 @@ import org.bukkit.scheduler.BukkitTask
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.sin
 
 /** Owns an independent, viewer-only ModelEngine clone without changing the NPC's shared model. */
@@ -47,18 +45,21 @@ internal class DialogueModelPortrait(private val player: Player) {
         if (definition.type() != NpcType.MODEL_ENGINE) return false
         val modelId = definition.modelId()?.takeIf(String::isNotBlank) ?: return false
         val blueprint = ModelEngineAPI.getBlueprint(modelId) ?: return false
-        val hitbox = blueprint.mainHitbox
-        // The shader views the model turned SHADER_YAW; turning the dummy by -(facing + SHADER_YAW) nets out to facing.
+        // The shader views the model turned VIEW_YAW; turning the dummy by -(facing + VIEW_YAW) nets out to facing.
         val facing = Math.toRadians(facingDegrees)
-        yaw = Math.toDegrees(-facing - SHADER_YAW).toFloat()
-        val projectedWidth = abs(cos(facing)) * hitbox.width + abs(sin(facing)) *
-            (abs(cos(0.10)) * hitbox.depth + abs(sin(0.10)) * hitbox.height)
-        val projectedHeight = abs(cos(0.10)) * hitbox.height + abs(sin(0.10)) * hitbox.depth
-        val extent = maxOf(projectedWidth, projectedHeight, hitbox.depth, 0.25)
+        yaw = Math.toDegrees(-facing - DialogueModelRenderer.VIEW_YAW).toFloat()
         val tuning = DialoguePortraitTuning.resolve(npcId)
-        val scale = 1.8 / extent * tuning.scale
-        // The shader maps 46 px per block into the 96 px box; offset-y is in box heights (+ up).
-        val centerY = (hitbox.height * scale * 0.5 - tuning.offsetY * BOX_BLOCKS).toFloat()
+        val animation = definition.modelAnimation()?.takeIf(String::isNotBlank)
+        val loopMode = BlueprintAnimation.LoopMode.getOrNull(definition.modelAnimationLoop())
+            ?: BlueprintAnimation.LoopMode.HOLD
+        val geometry = DialogueModelGeometry.of(blueprint.name)
+        // Without an animation of its own the preview idles, which loops.
+        val track = DialoguePortraitTrack.of(
+            blueprint.name, geometry?.stamp ?: 0L, animation,
+            animation == null || loopMode == BlueprintAnimation.LoopMode.LOOP, facingDegrees,
+        )
+        // Framing an earlier line already measured: pose at its scale from the first tick, so it shows at once.
+        val scale = track.sample?.let { tuning.fit(DialogueModelFraming.frame(it, tuning.focus)).toDouble() } ?: 1.0
 
         DialoguePortraitLifecycle.register(this, player.uniqueId, ::dispose)
         owners.put(player.uniqueId, this)?.takeIf { it !== this }?.dispose()
@@ -82,7 +83,7 @@ internal class DialogueModelPortrait(private val player: Player) {
             clone.setBaseEntityVisible(false)
             val model = ModelEngineAPI.createActiveModel(
                 blueprint,
-                { active -> DialogueModelRenderer(active, centerY) },
+                { active -> DialogueModelRenderer(active, geometry, track, tuning) },
                 { active -> DialoguePortraitAnimationHandler(active) },
             )
             model.setScale(scale)
@@ -95,11 +96,9 @@ internal class DialogueModelPortrait(private val player: Player) {
             definition.skin()?.let { skin ->
                 applyPlayerLimbTexture(model, skin.source(), skin.texture(), skin.signature())
             }
-            val animation = definition.modelAnimation()?.takeIf(String::isNotBlank)
             if (animation != null) {
                 model.animationHandler.playAnimation(animation, 0.0, 0.0, 1.0, true)?.apply {
-                    forceLoopMode = BlueprintAnimation.LoopMode.getOrNull(definition.modelAnimationLoop())
-                        ?: BlueprintAnimation.LoopMode.HOLD
+                    forceLoopMode = loopMode
                     forceOverride = BlueprintAnimation.OverrideMode.OVERRIDE
                 }
             }
@@ -175,10 +174,6 @@ internal class DialogueModelPortrait(private val player: Player) {
     }
 
     private companion object {
-        /** Fixed yaw in departed_dialogue_model_vsh.glsl's projection. */
-        const val SHADER_YAW = -0.23
-        /** Portrait box height in blocks (96 px at 46 px per block, departed_dialogue_model_vsh.glsl). */
-        const val BOX_BLOCKS = 96.0 / 46.0
         val owners = ConcurrentHashMap<UUID, DialogueModelPortrait>()
     }
 }
