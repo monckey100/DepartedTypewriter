@@ -102,6 +102,7 @@ internal class DialogueModelPortrait(private val player: Player) {
                 model.setBrightness(-1, 15, 15)
                 model.setInstant(true)
                 model.setMuted(true)
+                model.setShadow(false)
                 definition.skin()?.let { skin ->
                     val textures = if (skin.source() == SkinSource.MIRROR) Skins.of(player) else skin.texture()
                     if (!textures.isNullOrBlank()) model.setSkin(textures)
