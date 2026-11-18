@@ -59,7 +59,8 @@ class DepartedNpcModelAnimationRuntime : Initializable {
                 val seen = api.getModelAnimation(player, id)
                 when {
                     wanted == null -> if (seen != null) api.stopModelAnimation(player, id)
-                    wanted.animation != seen -> api.playModelAnimation(player, id, wanted.animation, wanted.loop)
+                    wanted.animation != seen ->
+                        api.playModelAnimation(player, id, wanted.animation, wanted.loop, wanted.hideName)
                 }
             }
         }

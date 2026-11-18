@@ -44,6 +44,9 @@ class DepartedNpcCriteriaModelAnimationEntry(
     @Help("How it ends: HOLD stays on the last frame, LOOP repeats, ONCE plays and returns to what everyone sees.")
     @Default("\"HOLD\"")
     val loop: String = "HOLD",
+    @Help("Hide the NPC's name plate from those players while they see the animation (a body has no name tag).")
+    @Default("false")
+    val hideName: Boolean = false,
     @Help("Players who match all of these criteria see the NPC in the animation.")
     val criteria: List<Criteria> = emptyList(),
     @Help("When several entries match for the same NPC, the highest priority wins.")
