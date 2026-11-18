@@ -84,7 +84,7 @@ class DialogueModelFramingTest {
     }
 
     @Test
-    fun `cubes are read around their group pivot in ModelEngine space from both file layouts`() {
+    fun `cubes are read around their group pivot in bone space from both file layouts`() {
         val head = UUID.randomUUID()
         val body = UUID.randomUUID()
         val hat = UUID.randomUUID()

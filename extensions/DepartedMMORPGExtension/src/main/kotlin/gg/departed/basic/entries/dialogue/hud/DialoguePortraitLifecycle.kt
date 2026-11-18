@@ -36,7 +36,7 @@ class DialoguePortraitLifecycle : Initializable, Listener {
 
     @EventHandler
     fun onDisable(event: PluginDisableEvent) {
-        if (event.plugin === plugin || event.plugin.name == "ModelEngine") closeAll()
+        if (event.plugin === plugin || event.plugin.name == "DepartedModels") closeAll()
     }
 
     private suspend fun onMainThread(task: () -> Unit) {

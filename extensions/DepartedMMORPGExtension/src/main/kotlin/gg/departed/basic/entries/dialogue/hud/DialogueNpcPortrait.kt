@@ -59,14 +59,15 @@ class DialogueNpcPortrait(private val player: Player) {
             backdrop = false
             return showCarrier(profile)
         }
-        if (!Bukkit.getPluginManager().isPluginEnabled("ModelEngine")) return false
+        // DialogueModelPortrait links against DepartedModels: it is not touched while that plugin is missing.
+        if (!Bukkit.getPluginManager().isPluginEnabled("DepartedModels")) return false
         val model = DialogueModelPortrait(player)
         if (!model.show(npcId, facingDegrees)) return false
         modelPortrait = model
         return showBackdrop()
     }
 
-    /** Supply an opaque background behind a separately rendered ModelEngine portrait. Main thread only. */
+    /** Supply an opaque background behind a separately rendered model portrait. Main thread only. */
     fun showBackdrop(): Boolean {
         check(Bukkit.isPrimaryThread()) { "Dialogue portraits must be shown on the Bukkit main thread" }
         if (disposed || !player.isOnline) return false

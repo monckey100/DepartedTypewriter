@@ -14,10 +14,11 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Where a blueprint's cubes are, read from its .bbmodel: ModelEngine keeps bone pivots but not the geometry, and
- * its hitbox says nothing about where the head is. [corners] are x, y, z triples around each group's own pivot in
- * ModelEngine bone space (blocks, Blockbench x and z negated), so a live bone matrix places them in the pose the
- * model is actually in. Groups are matched to bones by the uuid ModelEngine copies onto its blueprint bones.
+ * Where a model's cubes are, read from its .bbmodel: DepartedModels' compiled model has its bones' pivots but not
+ * their cubes, and its hit box says nothing about where the head is. [corners] are x, y, z triples around each
+ * group's own pivot in the space the engine poses bones in (blocks, Blockbench x and z negated), so a posed bone's
+ * position and rotation place them in the pose the model is actually in. A group is keyed by its Blockbench uuid,
+ * its identity inside the file; [names] ties the groups to the engine's bones.
  */
 internal class DialogueModelGeometry(
     val corners: Map<UUID, FloatArray>,
@@ -27,7 +28,7 @@ internal class DialogueModelGeometry(
     val head: Set<UUID>,
     /** Changes whenever the file does, so framing measured on an older version is not reused. */
     val stamp: Long,
-    /** Every group's name: DepartedModels knows its bones by name, not by Blockbench's uuid. */
+    /** Every group's name: DepartedModels knows its bones by name, so a bone is matched to its group by it. */
     val names: Map<UUID, String>,
 ) {
     companion object {
@@ -42,9 +43,9 @@ internal class DialogueModelGeometry(
         @Volatile
         private var indexedAt = 0L
 
-        /** Geometry of the blueprint ModelEngine calls [blueprintName] (its file name), or null if unreadable. */
-        fun of(blueprintName: String): DialogueModelGeometry? {
-            val name = blueprintName.lowercase(Locale.ENGLISH)
+        /** Geometry of the model DepartedModels calls [modelId] (its file name), or null if unreadable. */
+        fun of(modelId: String): DialogueModelGeometry? {
+            val name = modelId.lowercase(Locale.ENGLISH)
             val file = cache[name]?.file?.takeIf(File::isFile) ?: locate(name) ?: return null
             val modified = file.lastModified()
             val length = file.length()
@@ -66,9 +67,10 @@ internal class DialogueModelGeometry(
             val now = System.currentTimeMillis()
             if (now - indexedAt < 10_000L) return null
             indexedAt = now
-            val folder = Bukkit.getPluginManager().getPlugin("ModelEngine")?.dataFolder?.resolve("blueprints")
-                ?: return null
-            // ModelEngine names a blueprint after its file, whatever folder it sits in; the first one sorted wins.
+            // The folder DepartedModels compiles its models from: the "blueprints" key of its config.
+            val folder = Bukkit.getPluginManager().getPlugin("DepartedModels")?.config
+                ?.getString("blueprints", "plugins/DepartedModels/blueprints")?.let(::File) ?: return null
+            // DepartedModels names a model after its file, whatever folder it sits in; the first one sorted wins.
             files = folder.walkTopDown().filter { it.isFile && it.extension.equals("bbmodel", ignoreCase = true) }
                 .sortedBy { it.path }.groupBy { it.nameWithoutExtension.lowercase(Locale.ENGLISH) }
                 .mapValues { it.value.first() }

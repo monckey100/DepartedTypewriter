@@ -31,15 +31,15 @@ The launcher renders `.tpl` files at boot. Load the matching engine, extension a
 
 ## Character preview
 
-For live ModelEngine framing tests, edit the running server's `plugins/Typewriter/config.yml`, then run
-`/tw reload` and reopen the NPC conversation. `dialogue.hud.models.npcs.<npc-id>.offset-y` and `scale` override
-their global settings. Keep the same values in `config.yml.tpl` for persistence: the launcher renders that
+For live model framing tests, edit the running server's `plugins/Typewriter/config.yml`, then run
+`/tw reload` and reopen the NPC conversation. `dialogue.hud.framing.npcs.<npc-id>.offset-x`, `offset-y`, `scale`
+and `focus` override their global settings. Keep the same values in `config.yml.tpl` for persistence: the launcher renders that
 template at startup, while Typewriter reloads the generated `config.yml` directly. A new engine JAR requires
 one server restart before its updated reload behavior is available.
 
 The preview uses a viewer-only rendering carrier and the NPC's existing resources. It does not replace or move the original NPC, change the player's camera, or require an image file per character. The player-style preview uses the cached skin, including mirror skins and the skin's slim/classic model selection.
 
-ModelEngine NPCs use an independent instance of their existing blueprint with the original textures and configured animation. A private dummy base restricts that instance to the dialogue player. Preview animation skips global script/effect keyframes so a visual copy cannot replay gameplay commands. PlayerLimb models reuse their configured or mirrored skin. Fitting uses the model's authored main hitbox; accessories outside that hitbox may need framing adjustment after an in-game check. Ordinary `MOB` NPCs do not yet have a dedicated portrait renderer.
+Model NPCs use an independent DepartedModels instance of their existing model with the original textures and configured animation, shown only to the dialogue player; without DepartedModels they get no portrait. Player-limb models reuse their configured or mirrored skin. The window frames itself from the model's cubes in its live pose: a bust aimed at the head when that is a closer shot than the whole body, the whole body centred otherwise. A model whose `.bbmodel` cannot be read is framed from its hit box. Ordinary `MOB` NPCs do not yet have a dedicated portrait renderer.
 
 The 3D preview renders in the world pass while the text and frame render in the GUI pass. Minecraft does not report the F1 hide-GUI setting to the server, so the preview can remain visible when F1 hides the frame. This is a vanilla transport limitation, not a client mod requirement.
 

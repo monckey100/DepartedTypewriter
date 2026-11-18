@@ -4,7 +4,7 @@ import com.typewritermc.engine.paper.plugin
 import org.bukkit.configuration.ConfigurationSection
 
 /**
- * Optional nudges on top of the automatic framing of ModelEngine portraits, from dialogue.hud.framing: offset-x and
+ * Optional nudges on top of the automatic framing of model portraits, from dialogue.hud.framing: offset-x and
  * offset-y move the model in portrait-box sizes (+ right / + up), scale multiplies the automatic size, and focus
  * picks the shot (auto, head or body). npcs.<npcId> overrides any of them.
  * The section is not the older dialogue.hud.models: those values corrected the hitbox framing and would misplace
