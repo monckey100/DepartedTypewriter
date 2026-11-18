@@ -18,6 +18,10 @@ dependencies {
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedRPG.jar"))
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedLanguage-1.0.0.jar"))
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/ModelEngine-R4.1.0.jar"))
+    // The ModelEngine replacement (DepartedCore/DepartedModels, mvn package it first): dialogue model portraits use it
+    // when it is installed. Not in jars/ until cutover; then the ModelEngine jar above and the "ModelEngine"
+    // dependency below go, and "DepartedModels" takes its place.
+    compileOnly(files("C:/Users/Admin/Documents/minecraftplugins/DepartedCore/DepartedModels/target/DepartedModels-0.1.0.jar"))
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.12.2")
     testImplementation("net.kyori:adventure-api:5.1.1")

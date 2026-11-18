@@ -27,6 +27,8 @@ internal class DialogueModelGeometry(
     val head: Set<UUID>,
     /** Changes whenever the file does, so framing measured on an older version is not reused. */
     val stamp: Long,
+    /** Every group's name: DepartedModels knows its bones by name, not by Blockbench's uuid. */
+    val names: Map<UUID, String>,
 ) {
     companion object {
         private val HEAD_NAME = Regex("(^|_)head\\d*($|_)")
@@ -88,6 +90,7 @@ internal class DialogueModelGeometry(
 
             val corners = HashMap<UUID, FloatArray>()
             val parents = HashMap<UUID, UUID?>()
+            val names = HashMap<UUID, String>()
             val heads = ArrayList<Pair<Int, UUID>>()
 
             fun walk(node: JsonObject, parent: UUID?, depth: Int) {
@@ -96,6 +99,7 @@ internal class DialogueModelGeometry(
                 val group = listed[id] ?: node
                 val origin = group.vector("origin")
                 parents[uuid] = parent
+                names[uuid] = group.string("name").orEmpty()
                 if (HEAD_NAME.containsMatchIn(group.string("name").orEmpty().lowercase(Locale.ENGLISH))) {
                     heads += depth to uuid
                 }
@@ -120,7 +124,7 @@ internal class DialogueModelGeometry(
             val head = heads.sortedBy { it.first }.asSequence()
                 .map { (_, top) -> top to corners.keys.filterTo(HashSet()) { under(it, top) } }
                 .firstOrNull { it.second.isNotEmpty() }
-            return DialogueModelGeometry(corners, head?.first, head?.second.orEmpty(), stamp)
+            return DialogueModelGeometry(corners, head?.first, head?.second.orEmpty(), stamp, names)
         }
 
         /** The eight corners of a cube, turned about its own pivot, relative to its group's [origin]. */
