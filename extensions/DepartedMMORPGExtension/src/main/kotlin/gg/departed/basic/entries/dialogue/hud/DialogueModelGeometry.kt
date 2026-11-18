@@ -67,9 +67,8 @@ internal class DialogueModelGeometry(
             val now = System.currentTimeMillis()
             if (now - indexedAt < 10_000L) return null
             indexedAt = now
-            // The folder DepartedModels compiles its models from: the "blueprints" key of its config.
-            val folder = Bukkit.getPluginManager().getPlugin("DepartedModels")?.config
-                ?.getString("blueprints", "plugins/DepartedModels/blueprints")?.let(::File) ?: return null
+            if (!Bukkit.getPluginManager().isPluginEnabled("DepartedModels")) return null
+            val folder = com.departed.models.api.DepartedModelsAPI.blueprintFolder()
             // DepartedModels names a model after its file, whatever folder it sits in; the first one sorted wins.
             files = folder.walkTopDown().filter { it.isFile && it.extension.equals("bbmodel", ignoreCase = true) }
                 .sortedBy { it.path }.groupBy { it.nameWithoutExtension.lowercase(Locale.ENGLISH) }
