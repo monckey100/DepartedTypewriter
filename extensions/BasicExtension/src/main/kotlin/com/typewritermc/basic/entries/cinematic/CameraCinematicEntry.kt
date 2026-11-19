@@ -20,6 +20,8 @@ import com.typewritermc.core.utils.switchContext
 import com.typewritermc.engine.paper.entry.Criteria
 import com.typewritermc.engine.paper.entry.entries.*
 import com.typewritermc.engine.paper.entry.temporal.SimpleCinematicAction
+import com.typewritermc.engine.paper.entry.temporal.ScopedCinematic
+import com.typewritermc.engine.paper.entry.temporal.scopedCinematic
 import com.typewritermc.engine.paper.extensions.packetevents.meta
 import com.typewritermc.engine.paper.extensions.packetevents.spectateEntity
 import com.typewritermc.engine.paper.extensions.packetevents.stopSpectatingEntity
@@ -90,8 +92,9 @@ class CameraCinematicEntry(
     @InnerMin(Min(10))
     val segments: List<CameraSegment> = emptyList(),
     val advancedCameraSettings: AdvancedCameraSettings = AdvancedCameraSettings(),
-) : PrimaryCinematicEntry {
+) : PrimaryCinematicEntry, ScopedCameraEntry {
     override fun create(player: Player): CinematicAction {
+        player.scopedCinematic?.let { return ScopedCameraCinematicAction(player, this, it) }
         return CameraCinematicAction(
             player,
             this,
@@ -106,6 +109,140 @@ class CameraCinematicEntry(
         )
     }
 
+}
+
+private class ScopedCameraCinematicAction(
+    private val player: Player,
+    private val entry: CameraCinematicEntry,
+    private val scope: ScopedCinematic,
+) : CinematicAction {
+    private var segment: CameraSegment? = null
+    private var path = emptyList<PointSegment>()
+    private var original: PlayerState? = null
+    private var mask: InventoryMask? = null
+    private var packets: InterceptionBundle? = null
+    private var camera: WrapperEntity? = null
+    private val hidden = mutableSetOf<UUID>()
+    private val bedrock = if (player.isFloodgate) player.geyserConnection else null
+    private val bedrockCameraId = UUID.randomUUID()
+    private var registered = false
+
+    override suspend fun tick(frame: Int) {
+        if (!scope.active) return
+        val next = entry.segments activeSegmentAt frame
+        if (next == null) {
+            if (registered) Dispatchers.Sync.switchContext { scope.clearCamera() }
+            segment = null
+            return
+        }
+        if (segment != next) {
+            path = next.path.transform(player, (next.duration - BASE_INTERPOLATION).coerceAtLeast(0)) {
+                scope.resolve(it).add(y = 1.6)
+            }
+            segment = next
+        }
+        val position = path.interpolate(frame - next.startFrame)
+        Dispatchers.Sync.switchContext {
+            scope.render(position) {
+                if (!registered) beginCamera()
+            }
+        }
+        val physicalMove = player.isFloodgate && bedrock == null || frame % 10 == 0 ||
+            player.world.uid.toString() != position.world.identifier ||
+            player.location.distanceSquared(position.toBukkitLocation()) > MAX_DISTANCE_SQUARED
+        if (physicalMove || camera == null && bedrock == null && !player.isFloodgate) scope.move(position)
+        Dispatchers.Sync.switchContext {
+            scope.render(position) {
+                if (bedrock != null) {
+                    bedrock.interpolateCameraPosition(position)
+                } else if (!player.isFloodgate) {
+                    var entity = camera
+                    if (entity == null) {
+                        entity = WrapperEntity(EntityTypes.TEXT_DISPLAY).meta<TextDisplayMeta> {
+                            positionRotationInterpolationDuration = BASE_INTERPOLATION
+                        }
+                        camera = entity
+                        entity.spawn(position.toPacketLocation())
+                        entity.addViewer(player.uniqueId)
+                        player.spectateEntity(entity)
+                    } else {
+                        entity.teleport(position.toPacketLocation())
+                    }
+                }
+            }
+        }
+    }
+
+    private fun beginCamera() {
+        scope.registerCamera(::cleanup)
+        registered = true
+        original = player.state(listOfNotNull(
+            ALLOW_FLIGHT, FLYING, EffectStateProvider(INVISIBILITY),
+            VELOCITY.takeIf { entry.advancedCameraSettings.restoreVelocity },
+        ))
+        player.allowFlight = true
+        player.isFlying = true
+        player.addPotionEffect(PotionEffect(INVISIBILITY, INFINITE_DURATION, 0, false, false))
+        server.onlinePlayers.filter { it.uniqueId != player.uniqueId }.forEach {
+            it.hidePlayer(plugin, player)
+            player.hidePlayer(plugin, it)
+            hidden += it.uniqueId
+        }
+        if (player.gameMode != GameMode.CREATIVE && !player.isFloodgate) {
+            if (ItemCoreBridge.active) mask = ItemCoreBridge.mask(player, MaskHide.ALL)
+            else player.fakeClearInventory()
+        }
+        packets = player.interceptPackets {
+            if (ItemCoreBridge.active) blockWorldInteraction() else keepFakeInventory()
+            !PacketType.Play.Client.INTERACT_ENTITY
+            !PacketType.Play.Client.PLAYER_POSITION
+            !PacketType.Play.Client.PLAYER_POSITION_AND_ROTATION
+            !PacketType.Play.Client.PLAYER_FLYING
+            !PacketType.Play.Client.PLAYER_ROTATION
+        }
+        bedrock?.setupCamera(bedrockCameraId)
+    }
+
+    private fun cleanup() {
+        val entity = camera
+        camera = null
+        cleanupStep {
+            player.stopSpectatingEntity()
+        }
+        cleanupStep { entity?.despawn() }
+        cleanupStep { entity?.remove() }
+        cleanupStep { bedrock?.resetCamera(bedrockCameraId) }
+        cleanupStep { packets?.cancel() }
+        packets = null
+        hidden.forEach { id ->
+            server.getPlayer(id)?.let {
+                cleanupStep { it.showPlayer(plugin, player) }
+                cleanupStep { player.showPlayer(plugin, it) }
+            }
+        }
+        hidden.clear()
+        cleanupStep { player.restore(original) }
+        original = null
+        val inventory = mask
+        mask = null
+        if (inventory != null) cleanupStep { inventory.release() }
+        else if (registered && player.gameMode != GameMode.CREATIVE && !player.isFloodgate && !ItemCoreBridge.active) {
+            cleanupStep { player.restoreInventory() }
+        }
+        registered = false
+    }
+
+    private fun cleanupStep(action: () -> Unit) {
+        runCatching(action).onFailure {
+            logger.warning("Scoped camera cleanup failed for ${player.name}: ${it.message}")
+        }
+    }
+
+    override suspend fun teardown() {
+        Dispatchers.Sync.switchContext { scope.clearCamera() }
+    }
+
+    override fun canFinish(frame: Int): Boolean = entry.segments canFinishAt frame
 }
 
 data class CameraSegment(

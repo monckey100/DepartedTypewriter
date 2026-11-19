@@ -7,8 +7,11 @@ import com.typewritermc.core.interaction.InteractionContext
 import com.typewritermc.core.utils.UntickedAsync
 import com.typewritermc.core.utils.launch
 import com.typewritermc.core.utils.ok
+import com.typewritermc.core.utils.failure
 import com.typewritermc.engine.paper.entry.entries.DialogueEntry
 import com.typewritermc.engine.paper.entry.entries.EventTrigger
+import com.typewritermc.engine.paper.entry.entries.EntryTrigger
+import com.typewritermc.engine.paper.entry.temporal.ScopedCinematicOutcome
 import com.typewritermc.engine.paper.entry.entries.SpeakerEntry
 import com.typewritermc.engine.paper.entry.triggerFor
 import com.typewritermc.engine.paper.events.AsyncDialogueEndEvent
@@ -29,6 +32,7 @@ class DialogueInteraction(
     private val player: Player,
     initialInteractionContext: InteractionContext,
     initialEntry: DialogueEntry,
+    internal val scoped: ScopedDialogue? = null,
 ) : Interaction, KoinComponent {
     private val _speakers: MutableSet<Ref<SpeakerEntry>> = mutableSetOf()
     val speakers: Set<Ref<SpeakerEntry>> by ::_speakers
@@ -39,6 +43,7 @@ class DialogueInteraction(
     private val sessionIdentity = InteractionContext(mapOf(DialogueSessionId to sessionId))
     private val sessionContext = initialInteractionContext.combine(sessionIdentity)
     private var capturesChat = false
+    private var disposed = false
 
     internal var currentEntry: DialogueEntry = initialEntry
     private var currentMessenger = initialEntry.messenger(player, sessionContext) ?: EmptyDialogueMessenger(
@@ -65,6 +70,10 @@ class DialogueInteraction(
         }
 
     override suspend fun initialize(): Result<Unit> {
+        if (scoped != null && !scoped.valid(player)) {
+            scoped.end(ScopedCinematicOutcome.CANCELLED)
+            return failure("Dialogue run is no longer active")
+        }
         setup()
         tick(playTime)
         Dispatchers.UntickedAsync.launch {
@@ -92,19 +101,37 @@ class DialogueInteraction(
     }
 
     override suspend fun tick(deltaTime: Duration) {
+        if (scoped != null && !scoped.valid(player)) {
+            scoped.end(ScopedCinematicOutcome.CANCELLED)
+            return
+        }
         if (!isActive) return
         playTime += deltaTime
 
         if (currentMessenger.state == MessengerState.FINISHED) {
             isActive = false
-            DialogueTrigger.FORCE_NEXT.triggerFor(player, currentMessenger.context)
+            if (scoped == null) DialogueTrigger.FORCE_NEXT.triggerFor(player, currentMessenger.context)
+            else completeScoped()
         } else if (currentMessenger.state == MessengerState.CANCELLED) {
             isActive = false
 
-            player.interruptInteraction(currentMessenger.context)
+            if (scoped == null) player.interruptInteraction(currentMessenger.context)
+            else scoped.end(ScopedCinematicOutcome.CANCELLED)
         }
 
+        if (scoped?.active == false) return
         currentMessenger.tick(TickContext(playTime, deltaTime))
+    }
+
+    internal fun completeScoped() {
+        val playback = scoped ?: return
+        if (!playback.valid(player)) {
+            playback.end(ScopedCinematicOutcome.CANCELLED)
+            return
+        }
+        isActive = false
+        playback.end(ScopedCinematicOutcome.COMPLETED,
+            currentMessenger.eventTriggers.filterIsInstance<EntryTrigger>().map { it.ref.id }.distinct())
     }
 
     fun finish() {
@@ -137,10 +164,23 @@ class DialogueInteraction(
     }
 
     override suspend fun teardown() {
+        if (disposed) return
+        disposed = true
         isActive = false
-        cleanupEntry(true)
-        Dispatchers.UntickedAsync.launch {
-            AsyncDialogueEndEvent(player).callEvent()
+        try {
+            cleanupEntry(true)
+            Dispatchers.UntickedAsync.launch {
+                AsyncDialogueEndEvent(player).callEvent()
+            }
+        } catch (failure: Exception) {
+            scoped?.end(ScopedCinematicOutcome.FAILED)
+            throw failure
+        } finally {
+            try {
+                scoped?.clearControls()
+            } finally {
+                scoped?.finish(ScopedCinematicOutcome.CANCELLED)
+            }
         }
     }
 }

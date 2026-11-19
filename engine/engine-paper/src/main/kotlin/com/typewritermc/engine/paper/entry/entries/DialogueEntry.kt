@@ -19,3 +19,6 @@ interface DialogueEntry : TriggerableEntry {
     fun messenger(player: Player, context: InteractionContext): DialogueMessenger<*>?
 }
 
+/** A dialogue node whose input and presentation can be owned by an external run. */
+interface ScopedDialogueEntry : DialogueEntry
+

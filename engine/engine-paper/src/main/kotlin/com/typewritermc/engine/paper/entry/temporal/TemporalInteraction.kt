@@ -11,6 +11,7 @@ import com.typewritermc.core.utils.switchContext
 import com.typewritermc.engine.paper.entry.entries.CinematicAction
 import com.typewritermc.engine.paper.entry.entries.CinematicEntry
 import com.typewritermc.engine.paper.entry.entries.EventTrigger
+import com.typewritermc.engine.paper.entry.entries.ScopedCinematicEntry
 import com.typewritermc.engine.paper.entry.matches
 import com.typewritermc.engine.paper.entry.temporal.TemporalState.ENDING
 import com.typewritermc.engine.paper.entry.temporal.TemporalState.PLAYING
@@ -20,7 +21,9 @@ import com.typewritermc.engine.paper.events.AsyncCinematicEndEvent
 import com.typewritermc.engine.paper.events.AsyncCinematicStartEvent
 import com.typewritermc.engine.paper.events.AsyncCinematicTickEvent
 import com.typewritermc.engine.paper.interaction.*
+import com.typewritermc.engine.paper.utils.Sync
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
@@ -34,6 +37,7 @@ class TemporalInteraction(
     private val startContext: InteractionContext,
     val eventTriggers: List<EventTrigger>,
     private val settings: TemporalSettings,
+    internal val scoped: ScopedCinematic? = null,
 ) : Interaction {
     internal var state = STARTING
         private set
@@ -47,6 +51,7 @@ class TemporalInteraction(
     override val priority by lazy { Query.findPageById(pageId)?.priority ?: 0 }
 
     private lateinit var actions: List<CinematicAction>
+    private var blockingStarted = false
 
     override val context: InteractionContext
         get() {
@@ -57,21 +62,33 @@ class TemporalInteraction(
 
     override suspend fun initialize(): Result<Unit> {
         if (state != STARTING) return failure("Temporal interaction is already initialized")
+        if (scoped != null && (!scoped.active || !ScopedCinematics.hasScene(pageId))) {
+            scoped.requestEnd(ScopedCinematicOutcome.FAILED)
+            return failure("Scoped cinematic ${pageId} is unavailable")
+        }
 
         if (settings.blockChatMessages) player.startBlockingMessages()
         if (settings.blockActionBarMessages) player.startBlockingActionBar()
+        blockingStarted = true
 
         actions = Query.findWhereFromPage<CinematicEntry>(pageId) {
-            it.criteria.matches(player, context)
+            (scoped == null || it is ScopedCinematicEntry) && it.criteria.matches(player, context)
         }.map { it.create(player) }.toList()
 
         actions.forEach {
             try {
-                it.setup()
+                perform { if (scoped?.active != false) it.setup() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 e.printStackTrace()
+                if (scoped != null) {
+                    scoped.requestEnd(ScopedCinematicOutcome.FAILED)
+                    return failure("Could not set up scoped cinematic ${pageId}")
+                }
             }
         }
+        if (scoped?.active == false) return failure("Scoped cinematic ended during setup")
 
         state = PLAYING
 
@@ -82,14 +99,11 @@ class TemporalInteraction(
     }
 
     override suspend fun tick(deltaTime: Duration) {
-        if (state != PLAYING) return
+        if (state != PLAYING || scoped?.active == false) return
         if (canEnd) {
             // The clock was moved past the last frame between ticks (TemporalSetFrameTrigger): still end the
             // cinematic, once. Without this the interaction would idle here forever.
-            if (!stopRequested) {
-                stopRequested = true
-                TemporalStopTrigger.triggerFor(player, context)
-            }
+            requestStop()
             return
         }
 
@@ -100,47 +114,68 @@ class TemporalInteraction(
         coroutineScope {
             actions.map {
                 launch {
+                    if (scoped?.active == false) return@launch
                     try {
-                        it.tick(frame)
+                        perform { if (scoped?.active != false) it.tick(frame) }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
                     } catch (e: Exception) {
                         e.printStackTrace()
+                        scoped?.requestEnd(ScopedCinematicOutcome.FAILED)
                     }
                 }
             }.joinAll()
         }
-        AsyncCinematicTickEvent(player, frame).callEvent()
+        if (scoped?.active != false) AsyncCinematicTickEvent(player, frame).callEvent()
 
-        if (canEnd && !stopRequested) {
-            stopRequested = true
-            TemporalStopTrigger.triggerFor(player, context)
-        }
+        if (canEnd) requestStop()
     }
 
     private val canEnd get() = actions.all { it.canFinish(frame) }
     /** The stop trigger has been fired for this interaction; it must not fire twice (the page triggers would double). */
     private var stopRequested = false
 
+    private suspend fun perform(action: suspend () -> Unit) {
+        if (scoped == null) action()
+        else Dispatchers.Sync.switchContext { action() }
+    }
+
+    private fun requestStop() {
+        if (stopRequested) return
+        stopRequested = true
+        if (scoped == null) TemporalStopTrigger.triggerFor(player, context)
+        else scoped.requestEnd(ScopedCinematicOutcome.COMPLETED)
+    }
+
     override suspend fun teardown() {
-        if (state != PLAYING) return
+        if (state == ENDING || state != PLAYING && scoped == null) return
+        val started = state == PLAYING
         state = ENDING
         val originalFrame = frame
 
-        if (settings.blockChatMessages) {
-            player.stopBlockingMessages()
-            player.chatHistory.resendMessages(player)
-        }
-        if (settings.blockActionBarMessages) player.stopBlockingActionBar()
-
-        actions.forEach {
-            try {
-                it.teardown()
-            } catch (e: Exception) {
-                e.printStackTrace()
+        try {
+            if (blockingStarted) {
+                if (settings.blockChatMessages) {
+                    player.stopBlockingMessages()
+                    player.chatHistory.resendMessages(player)
+                }
+                if (settings.blockActionBarMessages) player.stopBlockingActionBar()
             }
-        }
 
-        Dispatchers.UntickedAsync.switchContext {
-            AsyncCinematicEndEvent(player, originalFrame, pageId).callEvent()
+            if (::actions.isInitialized) actions.forEach {
+                try {
+                    perform { it.teardown() }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    scoped?.requestEnd(ScopedCinematicOutcome.FAILED)
+                }
+            }
+
+            if (started) Dispatchers.UntickedAsync.switchContext {
+                AsyncCinematicEndEvent(player, originalFrame, pageId).callEvent()
+            }
+        } finally {
+            scoped?.finish(ScopedCinematicOutcome.CANCELLED)
         }
     }
 

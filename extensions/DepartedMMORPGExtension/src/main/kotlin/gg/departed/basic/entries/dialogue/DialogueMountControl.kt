@@ -1,6 +1,8 @@
 package gg.departed.basic.entries.dialogue
 
 import com.typewritermc.engine.paper.snippets.snippet
+import com.typewritermc.engine.paper.entry.dialogue.scopedDialogue
+import com.typewritermc.engine.paper.entry.dialogue.ScopedDialogue
 import org.bukkit.Bukkit
 import org.bukkit.FluidCollisionMode
 import org.bukkit.Location
@@ -41,6 +43,7 @@ object DialogueMountControl {
     private class ControlMount(
         @JvmField val stand: ArmorStand,
         @JvmField val anchor: Location,
+        val scope: ScopedDialogue?,
     ) {
         // Bumped on every claim and every release. A scheduled teardown captures the generation at
         // release time and only fires if it is still current — i.e. no later node re-claimed.
@@ -51,13 +54,20 @@ object DialogueMountControl {
 
     /** Claim (or lazily create) the player's mount and seat them on it. MUST run on the main thread. */
     fun claim(player: Player): Claim {
+        val scope = player.scopedDialogue
+        if (mounts[player.uniqueId]?.scope !== scope) forceRemove(player.uniqueId)
         val handle = mounts[player.uniqueId]?.takeIf { it.stand.isValid } ?: run {
             // Anchor = the player's feet. If airborne when the dialogue opens, snap to the ground
             // below; otherwise their exact spot. Computed ONCE when the mount is created and frozen
             // for the whole conversation, so node-to-node transitions can't drift the height.
             val base = if (player.isOnGround) player.location.clone() else groundedLocation(player.location)
             val stand = spawnStand(player, base.clone().add(0.0, dialogueMountOffsetY, 0.0))
-            ControlMount(stand, base.clone()).also { mounts[player.uniqueId] = it }
+            ControlMount(stand, base.clone(), scope).also { mounts[player.uniqueId] = it }
+        }
+        scope?.let {
+            if (handle.generation == 0L) scope.registerControls {
+                if (mounts[player.uniqueId] === handle) forceRemove(player.uniqueId)
+            }
         }
         handle.generation++ // claim cancels any pending teardown from the previous node
         if (player.vehicle != handle.stand) handle.stand.addPassenger(player)
@@ -167,7 +177,8 @@ object DialogueMountControl {
     private const val WARP_AWAY_DISTANCE_SQ = 6.0 * 6.0 // movement is locked, so >6 blocks = a warp
 
     private fun spawnStand(player: Player, loc: Location): ArmorStand =
-        (player.world.spawnEntity(loc, EntityType.ARMOR_STAND) as ArmorStand).apply {
+        (player.scopedDialogue?.spawnControl(loc)
+            ?: player.world.spawnEntity(loc, EntityType.ARMOR_STAND) as ArmorStand).apply {
             isSilent = true
             isInvisible = true
             isInvulnerable = true

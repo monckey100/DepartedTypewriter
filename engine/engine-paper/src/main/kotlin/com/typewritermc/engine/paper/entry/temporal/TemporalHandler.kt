@@ -7,7 +7,7 @@ import com.typewritermc.engine.paper.interaction.TriggerHandler
 
 class TemporalHandler : TriggerHandler {
     override suspend fun trigger(event: Event, currentInteraction: Interaction?): TriggerContinuation {
-        if (TemporalStopTrigger in event && currentInteraction is TemporalInteraction) {
+        if (TemporalStopTrigger in event && currentInteraction is TemporalInteraction && currentInteraction.scoped == null) {
             return TriggerContinuation.Multi(
                 TriggerContinuation.EndInteraction,
                 TriggerContinuation.Append(Event(event.player, currentInteraction.context, currentInteraction.eventTriggers)),
@@ -15,7 +15,7 @@ class TemporalHandler : TriggerHandler {
         }
 
         val setFrameTriggers = event.triggers.filterIsInstance<TemporalSetFrameTrigger>().maxByOrNull { it.frame }
-        if (setFrameTriggers != null && currentInteraction is TemporalInteraction) {
+        if (setFrameTriggers != null && currentInteraction is TemporalInteraction && currentInteraction.scoped == null) {
             currentInteraction.frame(setFrameTriggers.frame)
         }
 

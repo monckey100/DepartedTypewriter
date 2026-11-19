@@ -8,6 +8,7 @@ import com.typewritermc.core.extension.annotations.Segments
 import com.typewritermc.engine.paper.entry.Criteria
 import com.typewritermc.engine.paper.entry.entries.CinematicAction
 import com.typewritermc.engine.paper.entry.entries.CinematicEntry
+import com.typewritermc.engine.paper.entry.entries.ScopedCinematicEntry
 import com.typewritermc.engine.paper.entry.entries.SpeakerEntry
 import com.typewritermc.engine.paper.interaction.acceptActionBarMessage
 import com.typewritermc.engine.paper.snippets.snippet
@@ -37,7 +38,7 @@ class SubtitleDialogueCinematicEntry(
     val speaker: Ref<SpeakerEntry> = emptyRef(),
     @Segments(icon = "fa6-solid:diagram-next")
     val segments: List<SingleLineDisplayDialogueSegment> = emptyList(),
-) : CinematicEntry {
+) : ScopedCinematicEntry {
 
     override fun create(player: Player): CinematicAction {
         return DisplayDialogueCinematicAction(

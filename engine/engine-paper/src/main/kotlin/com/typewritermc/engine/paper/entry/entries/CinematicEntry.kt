@@ -26,6 +26,12 @@ interface CinematicEntry : Entry {
 @Tags("primary_cinematic")
 interface PrimaryCinematicEntry : CinematicEntry
 
+/** Opt in only when playback and teardown affect just the receiving player. */
+interface ScopedCinematicEntry : CinematicEntry
+
+/** Marks an action that checks its entire camera path against the active playback scope. */
+interface ScopedCameraEntry : ScopedCinematicEntry
+
 infix fun <S : Segment> List<S>.activeSegmentAt(frame: Int) = firstOrNull { it isActiveAt frame }
 infix fun <S : Segment> List<S>.canFinishAt(frame: Int): Boolean = all { it canFinishAt frame }
 

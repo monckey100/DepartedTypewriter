@@ -23,6 +23,9 @@ import java.util.concurrent.ConcurrentHashMap
 
 class PlayerSessionManager : Listener, KoinComponent {
     private val sessions = ConcurrentHashMap<UUID, PlayerSession>()
+    @Volatile
+    var loaded: Boolean = false
+        private set
 
     val Player.session: PlayerSession?
         get() = sessions[uniqueId]
@@ -111,9 +114,11 @@ class PlayerSessionManager : Listener, KoinComponent {
         sessions.forEach { (_, session) ->
             session.setup()
         }
+        loaded = true
     }
 
     suspend fun unload() {
+        loaded = false
         sessions.forEach { (_, session) ->
             session.teardown()
         }
@@ -121,6 +126,7 @@ class PlayerSessionManager : Listener, KoinComponent {
     }
 
     suspend fun shutdown() {
+        loaded = false
         sessions.forEach { (_, session) ->
             session.teardown()
         }
