@@ -12,7 +12,6 @@ dependencies {
     compileOnly(project(":BasicExtension"))
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedNPC-1.0.0.jar"))
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/MythicDungeons-2.0.1-SNAPSHOT.jar"))
-    compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/ModelEngine-R4.1.0.jar"))
     compileOnly(files("C:/Users/Admin/Documents/minecraftplugins/DepartedCore/departedrpg/build/libs/DepartedRPG.jar"))
     compileOnly(files("C:/Users/Admin/Desktop/Minecraft Mods/GIT SERVER/DepartedServer/jars/DepartedLanguage-1.0.0.jar"))
 }
@@ -40,7 +39,6 @@ typewriter {
             dependency("MythicMobs")
             dependency("MythicDungeons")
             dependency("DepartedNPC")
-            dependency("ModelEngine")
             dependency("DepartedItemCore")
         }
     }

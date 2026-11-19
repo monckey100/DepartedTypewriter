@@ -2,8 +2,8 @@ repositories {}
 
 dependencies {
     // DepartedNPC as built from source (DepartedCore/DepartedNPC, mvn package): the criteria model animation entry
-    // needs its per-player model animation API, which the jar deployed in DepartedServer/jars does not have until
-    // the ModelEngine cutover. Deploy this extension only together with that DepartedNPC.
+    // needs its per-player model animation API, which DepartedNPC has where it draws its models with DepartedModels.
+    // Deploy this extension only together with that DepartedNPC.
     compileOnly(files("C:/Users/Admin/Documents/minecraftplugins/DepartedCore/DepartedNPC/target/DepartedNPC-1.0.0.jar"))
     // Quest-offer gate: reads quest state from DepartedRPG and inspects entries owned by these
     // sibling extensions (console_run_command, wasd_option). All extensions share one runtime

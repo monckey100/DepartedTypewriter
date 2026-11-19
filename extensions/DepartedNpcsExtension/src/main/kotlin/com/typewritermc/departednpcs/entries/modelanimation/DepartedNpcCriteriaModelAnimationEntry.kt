@@ -23,7 +23,7 @@ import org.bukkit.entity.Player
 /**
  * Shows a DepartedNPC model NPC in one of its model's own animations to the players whose facts satisfy the given
  * criteria, and only to them — one NPC that stands for one player and lies on the floor for another, with no
- * second NPC. Needs DepartedModels (ModelEngine shows everyone the same model).
+ * second NPC. Needs DepartedModels: it plays a model animation for single viewers.
  *
  * Uses DepartedNPC's in-memory per-player model animation, so nothing persists: the entry re-applies the right
  * animation within ticks of a login or character switch, which is what keeps it correct per character. An animation
