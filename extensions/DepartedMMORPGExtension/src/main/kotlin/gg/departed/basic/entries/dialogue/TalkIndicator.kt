@@ -14,9 +14,6 @@ import com.typewritermc.engine.paper.entry.entity.toProperty
 import com.typewritermc.engine.paper.extensions.packetevents.metas
 import com.typewritermc.engine.paper.utils.move
 import com.typewritermc.engine.paper.utils.toPacketLocation
-import com.typewritermc.engine.paper.utils.toPosition
-import com.typewritermc.engine.paper.entry.dialogue.ScopedDialogue
-import com.typewritermc.engine.paper.entry.dialogue.scopedDialogue
 import io.github.retrooper.packetevents.util.SpigotConversionUtil
 import me.tofaa.entitylib.EntityLib
 import me.tofaa.entitylib.meta.EntityMeta
@@ -88,11 +85,9 @@ class TalkIndicator(
     private val entities = mutableMapOf<UUID, WrapperEntity>()
     private var itemStack: ItemStack? = null
     private var indicatorScale = 0.55
-    private var scope: ScopedDialogue? = null
 
     fun init() {
         if (!settings.enabled) return
-        scope = player.scopedDialogue
 
         itemStack = settings.buildItem(player, context)
         indicatorScale = settings.scale.get(player, context).coerceAtLeast(0.01)
@@ -100,7 +95,7 @@ class TalkIndicator(
     }
 
     fun tick() {
-        if (!settings.enabled || !player.isOnline || scope?.valid(player) == false) {
+        if (!settings.enabled || !player.isOnline) {
             dispose()
             return
         }
@@ -111,19 +106,15 @@ class TalkIndicator(
             .forEach(::removeViewer)
 
         val location = player.location.clone().add(0.0, settings.heightOffset.get(player, context), 0.0)
-        val send = {
-            viewers.values.forEach { viewer ->
-                val entity = entities.getOrPut(viewer.uniqueId) {
-                    createEntity().also {
-                        it.spawn(location.toPacketLocation())
-                        it.addViewer(viewer.uniqueId)
-                    }
+        viewers.values.forEach { viewer ->
+            val entity = entities.getOrPut(viewer.uniqueId) {
+                createEntity().also {
+                    it.spawn(location.toPacketLocation())
+                    it.addViewer(viewer.uniqueId)
                 }
-                entity.move(location.toProperty())
             }
+            entity.move(location.toProperty())
         }
-        val scoped = scope
-        if (scoped == null) send() else scoped.render(location.toPosition(), send)
     }
 
     fun dispose() {
@@ -131,7 +122,6 @@ class TalkIndicator(
     }
 
     private fun viewers(): List<Player> {
-        if (scope != null) return listOf(player)
         return when (settings.viewers) {
             TalkIndicatorViewers.TALKING_PLAYER -> listOf(player)
             TalkIndicatorViewers.ALL_PLAYERS -> Bukkit.getOnlinePlayers().filter { it.world == player.world }

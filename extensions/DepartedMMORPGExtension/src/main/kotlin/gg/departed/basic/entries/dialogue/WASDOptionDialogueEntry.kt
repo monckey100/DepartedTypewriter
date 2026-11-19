@@ -56,7 +56,7 @@ class OptionDialogueEntry(
     @Help("The duration it takes to type out the message. If the duration is zero, the message will be displayed instantly.")
     val duration: Var<Duration> = ConstVar(Duration.ZERO),
     val talkIndicator: TalkIndicatorSettings = TalkIndicatorSettings(),
-) : ScopedDialogueEntry {
+) : DialogueEntry {
     // Prefer a linked speaker reference (backwards compat); otherwise use the inline name.
     override val speakerDisplayName: Var<String>
         get() = speaker.get()?.displayName ?: speakerName

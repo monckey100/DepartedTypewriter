@@ -7,25 +7,9 @@ import com.typewritermc.engine.paper.entry.entries.Event
 import com.typewritermc.engine.paper.entry.entries.entries
 import com.typewritermc.engine.paper.interaction.TriggerContinuation
 import com.typewritermc.engine.paper.interaction.TriggerHandler
-import com.typewritermc.engine.paper.entry.temporal.ScopedCinematicOutcome
-import com.typewritermc.engine.paper.entry.entries.InteractionEndTrigger
 
 class DialogueHandler : TriggerHandler {
     override suspend fun trigger(event: Event, currentInteraction: Interaction?): TriggerContinuation {
-        if (currentInteraction is DialogueInteraction && currentInteraction.scoped != null) {
-            if (event.context[DialogueSessionId] != currentInteraction.context[DialogueSessionId]) {
-                return TriggerContinuation.Nothing
-            }
-            if (InteractionEndTrigger in event) {
-                currentInteraction.scoped.end(ScopedCinematicOutcome.CANCELLED)
-            } else if (DialogueTrigger.FORCE_NEXT in event) {
-                currentInteraction.completeScoped()
-            } else if (DialogueTrigger.NEXT_OR_SKIP_ANIMATION in event) {
-                if (currentInteraction.animationComplete) currentInteraction.completeScoped()
-                else currentInteraction.animationComplete = true
-            }
-            return TriggerContinuation.KeepInteraction
-        }
         if (DialogueTrigger.NEXT_OR_SKIP_ANIMATION in event) {
             if (currentInteraction.completeDialogueAnimation()) return TriggerContinuation.Nothing
             return currentInteraction.triggerNextDialogue(event)

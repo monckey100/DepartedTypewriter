@@ -12,8 +12,6 @@ import com.typewritermc.core.extension.Initializable
 import com.typewritermc.core.extension.annotations.Singleton
 import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
 import com.typewritermc.engine.paper.entry.temporal.isPlayingTemporal
-import com.typewritermc.engine.paper.entry.temporal.ScopedNarrationProvider
-import com.typewritermc.engine.paper.entry.temporal.ScopedCinematicOutcome
 import gg.departed.basic.entries.dialogue.DialogueMountControl
 import com.typewritermc.engine.paper.plugin
 import com.typewritermc.engine.paper.utils.asMini
@@ -36,12 +34,8 @@ import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.scheduler.BukkitTask
-import org.bukkit.plugin.ServicePriority
 import java.util.UUID
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CompletionStage
 import java.util.concurrent.ConcurrentHashMap
-import java.util.function.BooleanSupplier
 
 /**
  * Auto-dismissing subtitle lines ("barks"): a mob or NPC line that shows on the HUD band without a mount,
@@ -70,7 +64,6 @@ object SubtitleBarks {
     const val ATTACK = 0
 
     class Bark(val speaker: Component, val body: String, val holdMillis: Long, val priority: Int = STORY) {
-        internal var scope: ScopedBark? = null
         val plain: String = body.stripped()
         val characters: Int = plain.codePointCount(0, plain.length)
         val typingMillis: Long = characters.toLong() * subtitleMillisPerCharacter
@@ -81,10 +74,6 @@ object SubtitleBarks {
         val createdAt: Long = System.currentTimeMillis()
     }
 
-    internal class ScopedBark(val id: UUID, val active: BooleanSupplier) {
-        val result = CompletableFuture<ScopedCinematicOutcome>()
-    }
-
     private class Foreign(val component: Component, val at: Long)
 
     private const val QUEUE_LIMIT = 8
@@ -93,59 +82,29 @@ object SubtitleBarks {
     /** Story lines waiting behind the current one, oldest first. */
     private val queued = ConcurrentHashMap<UUID, java.util.ArrayDeque<Bark>>()
     private val foreign = ConcurrentHashMap<UUID, Foreign>()
-    private val executions = ConcurrentHashMap<UUID, Pair<UUID, Bark>>()
     private var tick = 0
 
     /** @return false when the line was dropped (an attack line while story is up). */
     fun show(player: Player, speaker: Component, body: String, holdMillis: Long, priority: Int = STORY): Boolean {
-        val bark = Bark(speaker, body, holdMillis.coerceAtLeast(500L), priority)
-        return enqueue(player, bark)
-    }
-
-    internal fun showScoped(
-        player: Player, id: UUID, speaker: String, body: String, holdMillis: Long, priority: Int, active: BooleanSupplier,
-    ): CompletionStage<ScopedCinematicOutcome> {
-        check(Bukkit.isPrimaryThread()) { "Scoped subtitle submission needs the server thread" }
-        if (!player.isOnline || !active.asBoolean || holdMillis !in 500L..3_600_000L || priority !in 0..10) {
-            return CompletableFuture.completedFuture(ScopedCinematicOutcome.FAILED)
-        }
-        val scope = ScopedBark(id, active)
-        val translatedSpeaker = if (speaker == "-") Component.empty() else parseText(DepartedLang.tr(player, speaker))
-        val translatedText = DepartedLang.tr(player, body).parsePlaceholders(player)
-        val formatted = if (translatedText.contains('&') || translatedText.contains('§')) {
-            net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(parseText(translatedText))
-        } else translatedText
-        val bark = Bark(translatedSpeaker, formatted, holdMillis, priority).also { it.scope = scope }
-        val owned = player.uniqueId to bark
-        if (executions.putIfAbsent(id, owned) != null) {
-            return CompletableFuture.completedFuture(ScopedCinematicOutcome.FAILED)
-        }
-        scope.result.whenComplete { _, _ -> executions.remove(id, owned) }
-        if (!enqueue(player, bark)) finish(bark, ScopedCinematicOutcome.CANCELLED)
-        return scope.result
-    }
-
-    private fun enqueue(player: Player, bark: Bark): Boolean {
         val uuid = player.uniqueId
-        val priority = bark.priority
+        val bark = Bark(speaker, body, holdMillis.coerceAtLeast(500L), priority)
         val current = barks[uuid]
         val storyUp = current != null && current.priority >= STORY
         if (priority < STORY && (storyUp || queued[uuid]?.isNotEmpty() == true)) return false
-        val speakerMini = net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(bark.speaker)
-        StoryLog.record(player, speakerMini, bark.body)
-        if (priority >= STORY) StoryLog.showInAll(player, speakerMini, bark.body)
+        val speakerMini = net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().serialize(speaker)
+        StoryLog.record(player, speakerMini, body)
+        if (priority >= STORY) StoryLog.showInAll(player, speakerMini, body)
         // A HIGHER priority cuts in (a deliberate interruption, e.g. `p:2` talking over someone mid-word).
         // Equal STORY lines queue; equal interruptions (p:2 over p:2) replace each other: a timed call chain
         // (quest 66's dance, hold 7 s per call) must show each new call at once, not after the previous hold
         // (2026-10-25: Asmed saw every hint only as its window closed, the chain was unpassable again).
         if (priority >= STORY && storyUp && (priority < current!!.priority || (priority == current.priority && priority == STORY))) {
             val q = queued.computeIfAbsent(uuid) { java.util.ArrayDeque() }
-            if (q.size >= QUEUE_LIMIT) q.pollFirst()?.let { finish(it, ScopedCinematicOutcome.CANCELLED) }
+            if (q.size >= QUEUE_LIMIT) q.pollFirst()
             q.addLast(bark)
             return true
         }
         barks[uuid] = bark
-        current?.let { finish(it, ScopedCinematicOutcome.CANCELLED) }
         return true
     }
 
@@ -155,40 +114,16 @@ object SubtitleBarks {
         val now = System.currentTimeMillis()
         while (true) {
             val bark = q.pollFirst() ?: run { queued.remove(uuid); return false }
-            val valid = bark.scope?.let { runCatching { it.active.asBoolean }.getOrDefault(false) } != false
-            if (now - bark.createdAt <= PENDING_MILLIS && valid) { barks[uuid] = bark; return true }
-            finish(bark, ScopedCinematicOutcome.CANCELLED)
+            if (now - bark.createdAt <= PENDING_MILLIS) { barks[uuid] = bark; return true }
         }
     }
 
     fun isActive(uuid: UUID): Boolean = barks[uuid]?.startedAt?.let { it >= 0 } == true
 
     fun remove(uuid: UUID) {
-        barks.remove(uuid)?.let { finish(it, ScopedCinematicOutcome.CANCELLED) }
-        queued.remove(uuid)?.forEach { finish(it, ScopedCinematicOutcome.CANCELLED) }
+        barks.remove(uuid)
+        queued.remove(uuid)
         foreign.remove(uuid)
-    }
-
-    internal fun cancel(id: UUID) {
-        check(Bukkit.isPrimaryThread()) { "Scoped subtitle cancellation needs the server thread" }
-        val (uuid, bark) = executions[id] ?: return
-        if (barks.remove(uuid, bark)) {
-            if (!next(uuid)) {
-                foreign.remove(uuid)
-                Bukkit.getPlayer(uuid)?.sendActionBar(Component.empty().font(Key.key("departed:dialogue/space")))
-            }
-        } else {
-            queued[uuid]?.remove(bark)
-        }
-        finish(bark, ScopedCinematicOutcome.CANCELLED)
-    }
-
-    internal fun clear() {
-        (barks.keys + queued.keys).toSet().forEach(::remove)
-    }
-
-    private fun finish(bark: Bark, outcome: ScopedCinematicOutcome) {
-        bark.scope?.result?.complete(outcome)
     }
 
     internal fun captureForeign(uuid: UUID, component: Component) {
@@ -202,17 +137,8 @@ object SubtitleBarks {
         for ((uuid, bark) in barks) {
             val player = Bukkit.getPlayer(uuid)
             if (player == null || !player.isOnline) { remove(uuid); continue }
-            if (bark.scope?.let { runCatching { it.active.asBoolean }.getOrDefault(false) } == false) {
-                cancel(bark.scope!!.id)
-                continue
-            }
             if (bark.startedAt < 0) {
-                if (now - bark.createdAt > PENDING_MILLIS) {
-                    barks.remove(uuid, bark)
-                    finish(bark, ScopedCinematicOutcome.CANCELLED)
-                    next(uuid)
-                    continue
-                }
+                if (now - bark.createdAt > PENDING_MILLIS) { barks.remove(uuid); next(uuid); continue }
                 // Conversations (dialogue mount held) and cinematics own the action bar; wait until free.
                 if (player.isPlayingTemporal() || DialogueMountControl.heldStand(player) != null) continue
                 bark.startedAt = now
@@ -225,7 +151,6 @@ object SubtitleBarks {
                     foreign.remove(uuid)
                     player.sendActionBar(Component.empty().font(Key.key("departed:dialogue/space")))
                 }
-                finish(bark, ScopedCinematicOutcome.COMPLETED)
                 continue
             }
             val complete = elapsed >= bark.typingMillis
@@ -258,13 +183,12 @@ object SubtitleBarks {
 
 /** Owns the bark ticker, the `dsay` command and the action-bar passthrough while a bark is on screen. */
 @Singleton
-class SubtitleBarkService : Initializable, Listener, ScopedNarrationProvider {
+class SubtitleBarkService : Initializable, Listener {
     private var task: BukkitTask? = null
     private var passthrough: PacketListenerAbstract? = null
     private var command: Command? = null
 
     override suspend fun initialize() {
-        server.servicesManager.register(ScopedNarrationProvider::class.java, this, plugin, ServicePriority.Normal)
         server.pluginManager.registerEvents(this, plugin)
         task = Bukkit.getScheduler().runTaskTimer(plugin, Runnable { SubtitleBarks.tickAll() }, 1L, 1L)
         passthrough = object : PacketListenerAbstract(PacketListenerPriority.NORMAL) {
@@ -297,22 +221,12 @@ class SubtitleBarkService : Initializable, Listener, ScopedNarrationProvider {
     override suspend fun shutdown() {
         task?.cancel()
         task = null
-        SubtitleBarks.clear()
-        server.servicesManager.unregister(ScopedNarrationProvider::class.java, this)
         passthrough?.let { runCatching { PacketEvents.getAPI().eventManager.unregisterListener(it) } }
         passthrough = null
         command?.let { current -> dropCommands(Bukkit.getCommandMap()) { it === current } }
         command = null
         HandlerList.unregisterAll(this)
     }
-
-    override fun say(
-        player: Player, executionId: UUID, speaker: String, text: String,
-        holdMillis: Long, priority: Int, active: BooleanSupplier,
-    ): CompletionStage<ScopedCinematicOutcome> =
-        SubtitleBarks.showScoped(player, executionId, speaker, text, holdMillis, priority, active)
-
-    override fun cancel(executionId: UUID) = SubtitleBarks.cancel(executionId)
 
     /** Removes every matching command from the map, key by key; a failure never aborts the caller. */
     private fun dropCommands(commandMap: org.bukkit.command.CommandMap, match: (Command) -> Boolean) {

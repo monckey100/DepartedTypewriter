@@ -15,7 +15,6 @@ import com.typewritermc.engine.paper.entry.TriggerableEntry
 import com.typewritermc.engine.paper.entry.dialogue.DialogueMessenger
 import com.typewritermc.engine.paper.entry.entries.ConstVar
 import com.typewritermc.engine.paper.entry.entries.DialogueEntry
-import com.typewritermc.engine.paper.entry.entries.ScopedDialogueEntry
 import com.typewritermc.engine.paper.entry.entries.SpeakerEntry
 import com.typewritermc.engine.paper.entry.entries.Var
 import com.typewritermc.engine.paper.utils.isFloodgate
@@ -51,7 +50,7 @@ class ActionBarDialogueEntry(
     @Help("The duration it takes to type out the message.")
     val duration: Var<Duration> = ConstVar(Duration.ZERO),
     val talkIndicator: TalkIndicatorSettings = TalkIndicatorSettings(),
-) : ScopedDialogueEntry {
+) : DialogueEntry {
     override fun messenger(player: Player, context: InteractionContext): DialogueMessenger<ActionBarDialogueEntry> {
         return if (player.isFloodgate) BedrockActionBarDialogueDialogueMessenger(player, context, this)
         else JavaActionBarDialogueDialogueMessenger(player, context, this)

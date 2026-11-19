@@ -3,7 +3,6 @@ package gg.departed.basic.entries.dialogue
 import com.typewritermc.engine.paper.entry.entries.SoundSourceEntry
 import com.typewritermc.engine.paper.entry.entries.SpeakerEntry
 import com.typewritermc.engine.paper.plugin
-import com.typewritermc.engine.paper.entry.dialogue.scopedDialogue
 import dev.departed.departednpc.api.DepartedNpcApi
 import dev.departed.departednpc.api.DepartedNpcProvider
 import org.bukkit.Bukkit
@@ -47,7 +46,6 @@ object NpcNodController {
 
     /** Start the talking bob on [npcId] for [player], lasting [durationTicks]. Main thread. */
     fun start(npcId: String?, player: Player, durationTicks: Int) {
-        if (player.scopedDialogue != null) return
         val id = npcId?.trim()?.takeIf { it.isNotBlank() } ?: return
         if (durationTicks <= 0) return
         val api = api() ?: return
@@ -62,7 +60,6 @@ object NpcNodController {
 
     /** Stop the talking bob on [npcId] for [player] immediately. Main thread. */
     fun stop(npcId: String?, player: Player) {
-        if (player.scopedDialogue != null) return
         val id = npcId?.trim()?.takeIf { it.isNotBlank() } ?: return
         val k = key(player.uniqueId, id)
         stopTasks.remove(k)?.cancel()

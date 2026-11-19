@@ -10,15 +10,6 @@ import com.typewritermc.engine.paper.entry.temporal.ScopedCinematic
 import com.typewritermc.engine.paper.entry.temporal.ScopedCinematicOutcome
 import com.typewritermc.engine.paper.entry.temporal.TemporalInteraction
 import com.typewritermc.engine.paper.entry.temporal.TemporalSettings
-import com.typewritermc.engine.paper.entry.dialogue.DialogueInteraction
-import com.typewritermc.engine.paper.entry.dialogue.DialogueHandler
-import com.typewritermc.engine.paper.entry.dialogue.DialogueSessionId
-import com.typewritermc.engine.paper.entry.dialogue.DialogueTrigger
-import com.typewritermc.engine.paper.entry.dialogue.ScopedDialogue
-import com.typewritermc.engine.paper.entry.entries.InteractionEndTrigger
-import com.typewritermc.engine.paper.entry.matches
-import com.typewritermc.engine.paper.utils.Sync
-import com.typewritermc.core.utils.switchContext
 import com.typewritermc.engine.paper.logger
 import com.typewritermc.engine.paper.plugin
 import com.typewritermc.engine.paper.utils.AVERAGE_SCHEDULING_DELAY_MS
@@ -50,7 +41,6 @@ class PlayerSession(val player: Player) : KoinComponent {
     private var scheduledEvents = emptyList<Event>()
     private val eventMutex = Mutex()
     private var pendingCinematic: ScopedCinematic? = null
-    private var pendingDialogue: ScopedDialogue? = null
     private var closed = false
 
     private var lastTickTime = System.currentTimeMillis()
@@ -77,10 +67,8 @@ class PlayerSession(val player: Player) : KoinComponent {
             val startTime = System.currentTimeMillis()
             eventMutex.withLock {
                 endScopedCinematic()
-                endScopedDialogue()
                 runSchedule()
                 startScopedCinematic()
-                startScopedDialogue()
             }
             val now = System.currentTimeMillis()
             val deltaTime = now - lastTickTime
@@ -96,57 +84,9 @@ class PlayerSession(val player: Player) : KoinComponent {
 
     @Synchronized
     internal fun offerScopedCinematic(playback: ScopedCinematic): Boolean {
-        if (closed || pendingCinematic != null || pendingDialogue != null) return false
+        if (closed || pendingCinematic != null) return false
         pendingCinematic = playback
         return true
-    }
-
-    @Synchronized
-    internal fun offerScopedDialogue(playback: ScopedDialogue): Boolean {
-        if (closed || pendingCinematic != null || pendingDialogue != null) return false
-        pendingDialogue = playback
-        return true
-    }
-
-    @Synchronized
-    private fun takeScopedDialogue(): ScopedDialogue? {
-        val pending = pendingDialogue
-        pendingDialogue = null
-        return pending
-    }
-
-    private suspend fun startScopedDialogue() {
-        val playback = takeScopedDialogue() ?: return
-        val startContext = context()
-        if (scope != null || !playback.valid(player) || !playback.entry.criteria.matches(player, startContext)) {
-            playback.finish(ScopedCinematicOutcome.FAILED)
-            return
-        }
-        try {
-            Dispatchers.Sync.switchContext {
-                val dialogue = DialogueInteraction(player, startContext, playback.entry, playback)
-                scope = InteractionScope(dialogue)
-                scope?.initialize()
-            }
-        } catch (failure: Exception) {
-            playback.end(ScopedCinematicOutcome.FAILED)
-            logger.warning("Could not start scoped dialogue for ${player.name}: $failure")
-            if ((scope?.interaction as? DialogueInteraction)?.scoped !== playback) {
-                playback.finish(ScopedCinematicOutcome.FAILED)
-            }
-        }
-        endScopedDialogue()
-    }
-
-    private suspend fun endScopedDialogue() {
-        val current = scope ?: return
-        val playback = (current.interaction as? DialogueInteraction)?.scoped ?: return
-        if (playback.active) return
-        try {
-            Dispatchers.Sync.switchContext { current.teardown() }
-        } finally {
-            if (scope === current) scope = null
-        }
     }
 
     @Synchronized
@@ -205,17 +145,7 @@ class PlayerSession(val player: Player) : KoinComponent {
     }
 
     suspend fun tick(deltaTime: Duration) {
-        val current = scope
-        val dialogue = current?.interaction as? DialogueInteraction
-        if (dialogue?.scoped == null) current?.tick(deltaTime)
-        else Dispatchers.Sync.switchContext {
-            try {
-                dialogue.tick(deltaTime)
-            } catch (failure: Exception) {
-                dialogue.scoped.end(ScopedCinematicOutcome.FAILED)
-                throw failure
-            }
-        }
+        scope?.tick(deltaTime)
         trackers.forEach {
             tryCatch { it.tick() }
         }
@@ -251,22 +181,6 @@ class PlayerSession(val player: Player) : KoinComponent {
             val triggering = todo.removeFirst()
 
             if (triggering.triggers.isEmpty()) continue
-            val dialogue = interaction as? DialogueInteraction
-            if (dialogue?.scoped != null) {
-                if (triggering.context[DialogueSessionId] != dialogue.context[DialogueSessionId]) continue
-                val controls = triggering.triggers.filter {
-                    it == DialogueTrigger.NEXT_OR_SKIP_ANIMATION || it == DialogueTrigger.FORCE_NEXT ||
-                        it == InteractionEndTrigger
-                }
-                if (controls.isNotEmpty()) {
-                    Dispatchers.Sync.switchContext {
-                        getKoin().get<DialogueHandler>().trigger(
-                            Event(player, triggering.context, controls), dialogue,
-                        )
-                    }
-                }
-                continue
-            }
 
             val addingEvents = mutableListOf<Event>()
 
@@ -354,14 +268,9 @@ class PlayerSession(val player: Player) : KoinComponent {
     suspend fun teardown() {
         try {
             takeScopedCinematic(closing = true)?.finish(ScopedCinematicOutcome.CANCELLED)
-            takeScopedDialogue()?.finish(ScopedCinematicOutcome.CANCELLED)
-            (interaction as? DialogueInteraction)?.scoped?.end(ScopedCinematicOutcome.CANCELLED)
             (interaction as? TemporalInteraction)?.scoped?.requestEnd(ScopedCinematicOutcome.CANCELLED)
             sessionTickingJob?.cancel()
-            val current = scope
-            if ((current?.interaction as? DialogueInteraction)?.scoped != null) {
-                Dispatchers.Sync.switchContext { current.teardown() }
-            } else current?.teardown()
+            scope?.teardown()
             trackers.forEach { it.teardown() }
         } catch (t: Throwable) {
             logger.severe("Exception thrown while tearing down session for player '${player.name}'.")

@@ -13,7 +13,6 @@ import com.typewritermc.engine.paper.entry.entries.SoundIdEntry
 import com.typewritermc.engine.paper.entry.entries.SoundSourceEntry
 import com.typewritermc.engine.paper.entry.entries.Var
 import com.typewritermc.engine.paper.entry.temporal.scopedCinematic
-import com.typewritermc.engine.paper.entry.dialogue.scopedDialogue
 import com.typewritermc.engine.paper.extensions.packetevents.sendPacketTo
 import com.typewritermc.engine.paper.logger
 import net.kyori.adventure.sound.SoundStop
@@ -48,18 +47,14 @@ data class Sound(
         val key = this.soundId.namespacedKey ?: return
         val sound = AdventureSound.sound(key, track, volume.get(player, context), pitch.get(player, context))
         val scope = player.scopedCinematic
-        val dialogue = player.scopedDialogue
 
         when (soundSource) {
             is SelfSoundSource -> {
-                when {
-                    scope != null -> scope.render(player.position) { player.playSound(sound) }
-                    dialogue != null -> dialogue.render(player.position) { player.playSound(sound) }
-                    else -> player.playSound(sound)
-                }
+                if (scope != null) scope.render(player.position) { player.playSound(sound) }
+                else player.playSound(sound)
             }
             is EmitterSoundSource -> {
-                check(scope == null && dialogue == null) { "Scoped sounds need a local position or the receiving player" }
+                check(scope == null) { "Scoped sounds need a local position or the receiving player" }
                 val entryId = soundSource.entryId
                 val entry = Query.findById<SoundSourceEntry>(entryId)
                 if (entry == null) {
@@ -80,14 +75,9 @@ data class Sound(
             }
 
             is LocationSoundSource -> {
-                val location = scope?.resolve(soundSource.position)
-                    ?: dialogue?.resolve(soundSource.position) ?: soundSource.position
+                val location = scope?.resolve(soundSource.position) ?: soundSource.position
                 val send = { player.playSound(sound, location.x, location.y, location.z) }
-                when {
-                    scope != null -> scope.render(location, send)
-                    dialogue != null -> dialogue.render(location, send)
-                    else -> send()
-                }
+                if (scope != null) scope.render(location, send) else send()
             }
         }
     }
