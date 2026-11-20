@@ -12,11 +12,11 @@ import com.typewritermc.engine.paper.entry.TriggerableEntry
 import com.typewritermc.engine.paper.entry.entries.ConstVar
 import com.typewritermc.engine.paper.entry.entries.Var
 import com.typewritermc.engine.paper.utils.server
-import io.lumine.mythic.bukkit.events.MythicMobDeathEvent
+import dev.departed.itemcore.api.event.MobDefeatedEvent
 import net.playavalon.mythicdungeons.api.events.dungeon.DungeonStartEvent
 import net.playavalon.mythicdungeons.api.events.dungeon.PlayerFinishDungeonEvent
 import net.playavalon.mythicdungeons.api.parents.dungeons.AbstractDungeon
-import org.bukkit.entity.Player
+import org.bukkit.Bukkit
 import org.koin.java.KoinJavaComponent.get
 
 @Entry("kill_mythicmob_objective", "Kill MythicMobs mobs", Colors.YELLOW, "fa6-solid:skull")
@@ -42,12 +42,12 @@ class KillMythicMobObjectiveEntry(
 ) : DepartedObjectiveEntry
 
 @EntryListener(KillMythicMobObjectiveEntry::class)
-fun onKillMythicMobObjective(event: MythicMobDeathEvent, query: Query<KillMythicMobObjectiveEntry>) {
-    val matching = query.findWhere { matchesPattern(it.mobName, event.mobType.internalName) }.toList()
+fun onKillMythicMobObjective(event: MobDefeatedEvent, query: Query<KillMythicMobObjectiveEntry>) {
+    val matching = query.findWhere { matchesPattern(it.mobName, event.type()) }.toList()
     if (matching.isEmpty()) return
 
     val manager = objectives()
-    val directKiller = event.killer as? Player
+    val directKiller = event.credited().firstNotNullOfOrNull { Bukkit.getPlayer(it) }
     // increment -> setProgress filters to players actually tracking the objective's quest.
     matching.forEach { objective ->
         if (objective.requirePlayerKiller) {
@@ -56,7 +56,7 @@ fun onKillMythicMobObjective(event: MythicMobDeathEvent, query: Query<KillMythic
         } else {
             // Dungeon/area fights: credit every questing player in the mob's world,
             // so mobs finished off by NPCs/clones still count.
-            val world = event.entity?.world ?: return@forEach
+            val world = event.at().world ?: return@forEach
             server.onlinePlayers.filter { it.world == world }.forEach { manager.increment(it, objective) }
         }
     }

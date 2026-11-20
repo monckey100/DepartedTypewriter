@@ -1,7 +1,7 @@
 includeBuild("../engine")
 includeBuild("../module-plugin")
 
-val ignoringExtensions: List<String> = emptyList()
+val ignoringExtensions: List<String> = listOf("MythicMobsExtension")
 
 val directories = file("./").listFiles()?.filter {
     it.name.endsWith("Extension") && it.isDirectory && it.name !in ignoringExtensions

@@ -1,11 +1,9 @@
 repositories {
     mavenLocal()
-    maven("https://mvn.lumine.io/repository/maven-public/")
     maven("https://repo.extendedclip.com/content/repositories/placeholderapi/")
 }
 
 dependencies {
-    compileOnly("io.lumine:Mythic-Dist:5.12.0")
     compileOnly("me.clip:placeholderapi:2.11.6")
     // Hard: collect/deliver objectives count and take items only through DepartedItemCore.
     compileOnly("dev.departed:DepartedItemCore:0.1.0") { isTransitive = false }
@@ -36,7 +34,7 @@ typewriter {
         paper {
             dependency("PlaceholderAPI")
             dependency("DepartedRPG")
-            dependency("MythicMobs")
+            dependency("DepartedMobs")
             dependency("MythicDungeons")
             dependency("DepartedNPC")
             dependency("DepartedItemCore")
