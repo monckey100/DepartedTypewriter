@@ -13,10 +13,10 @@ import com.typewritermc.engine.paper.entry.entries.ConstVar
 import com.typewritermc.engine.paper.entry.entries.Var
 import com.typewritermc.engine.paper.utils.server
 import dev.departed.itemcore.api.event.MobDefeatedEvent
-import net.playavalon.mythicdungeons.api.events.dungeon.DungeonStartEvent
-import net.playavalon.mythicdungeons.api.events.dungeon.PlayerFinishDungeonEvent
-import net.playavalon.mythicdungeons.api.parents.dungeons.AbstractDungeon
+import dev.departed.dungeons.api.DungeonCompletedEvent
+import dev.departed.dungeons.api.DungeonPlaces
 import org.bukkit.Bukkit
+import org.bukkit.event.player.PlayerChangedWorldEvent
 import org.koin.java.KoinJavaComponent.get
 
 @Entry("kill_mythicmob_objective", "Kill MythicMobs mobs", Colors.YELLOW, "fa6-solid:skull")
@@ -54,15 +54,20 @@ fun onKillMythicMobObjective(event: MobDefeatedEvent, query: Query<KillMythicMob
             // Normal quests: only the player who landed the kill counts.
             directKiller?.let { manager.increment(it, objective) }
         } else {
-            // Dungeon/area fights: credit every questing player in the mob's world,
-            // so mobs finished off by NPCs/clones still count.
+            // Dungeon/area fights: credit every questing player in the mob's world, so mobs finished
+            // off by NPCs/clones still count. A dungeon run plays in a copy inside a host world shared
+            // with other runs: there, only the players of the mob's own run count.
             val world = event.at().world ?: return@forEach
-            server.onlinePlayers.filter { it.world == world }.forEach { manager.increment(it, objective) }
+            val run = places()?.runAt(event.at())?.orElse(null)
+            server.onlinePlayers.filter {
+                it.world == world && (run == null || places()?.runOf(it)?.orElse(null) == run)
+            }.forEach { manager.increment(it, objective) }
         }
     }
 }
 
-@Entry("start_mythicdungeon_objective", "Start a MythicDungeons dungeon", Colors.BLUE, "mdi:dungeon")
+// The entry ids keep their old names so saved pages stay valid; the dungeons are DepartedDungeons' now.
+@Entry("start_mythicdungeon_objective", "Enter a dungeon", Colors.BLUE, "mdi:dungeon")
 class StartMythicDungeonObjectiveEntry(
     override val id: String = "",
     override val name: String = "",
@@ -72,19 +77,20 @@ class StartMythicDungeonObjectiveEntry(
     override val instruction: Var<String> = ConstVar("Start the target dungeon."),
     override val amount: Var<Int> = ConstVar(1),
     override val completeDepartedQuestWhenDone: Boolean = true,
-    @Help("Dungeon world name, display name, or folder name. Regex is supported. Leave empty for any dungeon.")
+    @Help("Dungeon id (the DepartedDungeons definition name). Regex is supported. Leave empty for any dungeon.")
     @Regex
     val dungeonName: String = "",
 ) : DepartedObjectiveEntry
 
+/** A player arrives in a run: every run plays in a copy inside a host world, so the arrival is a world change. */
 @EntryListener(StartMythicDungeonObjectiveEntry::class)
-fun onStartMythicDungeonObjective(event: DungeonStartEvent, query: Query<StartMythicDungeonObjectiveEntry>) {
-    query.findWhere { event.dungeon.matchesDungeon(it.dungeonName) }.forEach { objective ->
-        event.players.forEach { player -> objectives().increment(player, objective) }
-    }
+fun onStartMythicDungeonObjective(event: PlayerChangedWorldEvent, query: Query<StartMythicDungeonObjectiveEntry>) {
+    val run = places()?.runOf(event.player)?.orElse(null) ?: return
+    query.findWhere { matchesPattern(it.dungeonName, run.dungeonId()) }
+        .forEach { objectives().increment(event.player, it) }
 }
 
-@Entry("clear_mythicdungeon_objective", "Clear a MythicDungeons dungeon", Colors.BLUE, "mdi:flag-checkered")
+@Entry("clear_mythicdungeon_objective", "Clear a dungeon", Colors.BLUE, "mdi:flag-checkered")
 class ClearMythicDungeonObjectiveEntry(
     override val id: String = "",
     override val name: String = "",
@@ -94,25 +100,23 @@ class ClearMythicDungeonObjectiveEntry(
     override val instruction: Var<String> = ConstVar("Clear the target dungeon."),
     override val amount: Var<Int> = ConstVar(1),
     override val completeDepartedQuestWhenDone: Boolean = true,
-    @Help("Dungeon world name, display name, or folder name. Regex is supported. Leave empty for any dungeon.")
+    @Help("Dungeon id (the DepartedDungeons definition name). Regex is supported. Leave empty for any dungeon.")
     @Regex
     val dungeonName: String = "",
 ) : DepartedObjectiveEntry
 
+/** A run is completed: every player it credited (DungeonCompletedEvent) who is online counts. */
 @EntryListener(ClearMythicDungeonObjectiveEntry::class)
-fun onClearMythicDungeonObjective(event: PlayerFinishDungeonEvent, query: Query<ClearMythicDungeonObjectiveEntry>) {
-    val player = event.player ?: return
-    query.findWhere { event.dungeon.matchesDungeon(it.dungeonName) }
-        .forEach { objectives().increment(player, it) }
+fun onClearMythicDungeonObjective(event: DungeonCompletedEvent, query: Query<ClearMythicDungeonObjectiveEntry>) {
+    val completion = event.completion
+    val matching = query.findWhere { matchesPattern(it.dungeonName, completion.run().dungeonId()) }.toList()
+    if (matching.isEmpty()) return
+    completion.characters().keys.mapNotNull { Bukkit.getPlayer(it) }.forEach { player ->
+        matching.forEach { objectives().increment(player, it) }
+    }
 }
 
-private fun AbstractDungeon?.matchesDungeon(pattern: String): Boolean {
-    if (this == null) return pattern.isBlank()
-    if (pattern.isBlank()) return true
-    return matchesPattern(pattern, worldName)
-            || matchesPattern(pattern, displayName)
-            || matchesPattern(pattern, folder?.name.orEmpty())
-}
+private fun places(): DungeonPlaces? = Bukkit.getServicesManager().load(DungeonPlaces::class.java)
 
 private fun matchesPattern(pattern: String, value: String?): Boolean {
     val trimmed = pattern.trim()
