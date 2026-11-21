@@ -6,10 +6,6 @@ import com.typewritermc.core.utils.getAll
 import com.typewritermc.core.utils.launch
 import com.typewritermc.core.utils.tryCatch
 import com.typewritermc.engine.paper.entry.entries.Event
-import com.typewritermc.engine.paper.entry.temporal.ScopedCinematic
-import com.typewritermc.engine.paper.entry.temporal.ScopedCinematicOutcome
-import com.typewritermc.engine.paper.entry.temporal.TemporalInteraction
-import com.typewritermc.engine.paper.entry.temporal.TemporalSettings
 import com.typewritermc.engine.paper.logger
 import com.typewritermc.engine.paper.plugin
 import com.typewritermc.engine.paper.utils.AVERAGE_SCHEDULING_DELAY_MS
@@ -40,8 +36,6 @@ class PlayerSession(val player: Player) : KoinComponent {
 
     private var scheduledEvents = emptyList<Event>()
     private val eventMutex = Mutex()
-    private var pendingCinematic: ScopedCinematic? = null
-    private var closed = false
 
     private var lastTickTime = System.currentTimeMillis()
 
@@ -66,9 +60,7 @@ class PlayerSession(val player: Player) : KoinComponent {
             // TODO use kotlin.time.measureTime for these time measurements
             val startTime = System.currentTimeMillis()
             eventMutex.withLock {
-                endScopedCinematic()
                 runSchedule()
-                startScopedCinematic()
             }
             val now = System.currentTimeMillis()
             val deltaTime = now - lastTickTime
@@ -80,49 +72,6 @@ class PlayerSession(val player: Player) : KoinComponent {
             if (wait > 0) delay(wait)
             else if (wait < -100) logger.warning("The session ticker for ${player.name} is running behind! Took ${endTime - startTime}ms (if this only happens occasionally, it's fine)")
         }
-    }
-
-    @Synchronized
-    internal fun offerScopedCinematic(playback: ScopedCinematic): Boolean {
-        if (closed || pendingCinematic != null) return false
-        pendingCinematic = playback
-        return true
-    }
-
-    @Synchronized
-    private fun takeScopedCinematic(closing: Boolean = false): ScopedCinematic? {
-        if (closing) closed = true
-        val pending = pendingCinematic
-        pendingCinematic = null
-        return pending
-    }
-
-    private suspend fun startScopedCinematic() {
-        val playback = takeScopedCinematic() ?: return
-        if (scope != null || !player.isOnline || !playback.active) {
-            playback.finish(ScopedCinematicOutcome.FAILED)
-            return
-        }
-        val interaction = TemporalInteraction(
-            playback.pageId, player, context(), emptyList(), TemporalSettings(), playback,
-        )
-        val cinematic = InteractionScope(interaction)
-        scope = cinematic
-        try {
-            cinematic.initialize()
-        } catch (failure: Exception) {
-            playback.requestEnd(ScopedCinematicOutcome.FAILED)
-            logger.warning("Could not start scoped cinematic ${playback.pageId} for ${player.name}: $failure")
-        }
-        endScopedCinematic()
-    }
-
-    private suspend fun endScopedCinematic() {
-        val current = scope ?: return
-        val playback = (current.interaction as? TemporalInteraction)?.scoped ?: return
-        if (playback.active) return
-        current.teardown()
-        if (scope === current) scope = null
     }
 
     /**
@@ -267,8 +216,6 @@ class PlayerSession(val player: Player) : KoinComponent {
 
     suspend fun teardown() {
         try {
-            takeScopedCinematic(closing = true)?.finish(ScopedCinematicOutcome.CANCELLED)
-            (interaction as? TemporalInteraction)?.scoped?.requestEnd(ScopedCinematicOutcome.CANCELLED)
             sessionTickingJob?.cancel()
             scope?.teardown()
             trackers.forEach { it.teardown() }

@@ -9,7 +9,6 @@ import com.typewritermc.core.extension.annotations.Segments
 import com.typewritermc.engine.paper.entry.Criteria
 import com.typewritermc.engine.paper.entry.entries.CinematicAction
 import com.typewritermc.engine.paper.entry.entries.PrimaryCinematicEntry
-import com.typewritermc.engine.paper.entry.entries.ScopedCinematicEntry
 import com.typewritermc.engine.paper.entry.entries.Segment
 import com.typewritermc.engine.paper.entry.entries.Var
 import com.typewritermc.engine.paper.entry.entries.ConstVar
@@ -33,7 +32,7 @@ class MessageCinematicEntry(
     override val criteria: List<Criteria> = emptyList(),
     @Segments(icon = "flowbite:message-dots-solid")
     val segments: List<MessageSegment> = emptyList(),
-) : PrimaryCinematicEntry, ScopedCinematicEntry {
+) : PrimaryCinematicEntry {
     override fun create(player: Player): CinematicAction = MessageCinematicAction(player, this)
 }
 

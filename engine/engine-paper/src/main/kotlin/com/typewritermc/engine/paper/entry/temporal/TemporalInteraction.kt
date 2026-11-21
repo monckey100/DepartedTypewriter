@@ -11,7 +11,6 @@ import com.typewritermc.core.utils.switchContext
 import com.typewritermc.engine.paper.entry.entries.CinematicAction
 import com.typewritermc.engine.paper.entry.entries.CinematicEntry
 import com.typewritermc.engine.paper.entry.entries.EventTrigger
-import com.typewritermc.engine.paper.entry.entries.ScopedCinematicEntry
 import com.typewritermc.engine.paper.entry.matches
 import com.typewritermc.engine.paper.entry.temporal.TemporalState.ENDING
 import com.typewritermc.engine.paper.entry.temporal.TemporalState.PLAYING
@@ -21,7 +20,6 @@ import com.typewritermc.engine.paper.events.AsyncCinematicEndEvent
 import com.typewritermc.engine.paper.events.AsyncCinematicStartEvent
 import com.typewritermc.engine.paper.events.AsyncCinematicTickEvent
 import com.typewritermc.engine.paper.interaction.*
-import com.typewritermc.engine.paper.utils.Sync
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
@@ -30,6 +28,7 @@ import kotlinx.coroutines.launch
 import org.bukkit.entity.Player
 import org.koin.java.KoinJavaComponent
 import java.time.Duration
+import java.util.concurrent.CompletableFuture
 
 class TemporalInteraction(
     val pageId: String,
@@ -37,7 +36,8 @@ class TemporalInteraction(
     private val startContext: InteractionContext,
     val eventTriggers: List<EventTrigger>,
     private val settings: TemporalSettings,
-    internal val scoped: ScopedCinematic? = null,
+    /** Told once whether the page played to its last frame (true) or was stopped or never started (false). */
+    private val ended: CompletableFuture<Boolean>? = null,
 ) : Interaction {
     internal var state = STARTING
         private set
@@ -62,33 +62,24 @@ class TemporalInteraction(
 
     override suspend fun initialize(): Result<Unit> {
         if (state != STARTING) return failure("Temporal interaction is already initialized")
-        if (scoped != null && (!scoped.active || !ScopedCinematics.hasScene(pageId))) {
-            scoped.requestEnd(ScopedCinematicOutcome.FAILED)
-            return failure("Scoped cinematic ${pageId} is unavailable")
-        }
 
         if (settings.blockChatMessages) player.startBlockingMessages()
         if (settings.blockActionBarMessages) player.startBlockingActionBar()
         blockingStarted = true
 
         actions = Query.findWhereFromPage<CinematicEntry>(pageId) {
-            (scoped == null || it is ScopedCinematicEntry) && it.criteria.matches(player, context)
+            it.criteria.matches(player, context)
         }.map { it.create(player) }.toList()
 
         actions.forEach {
             try {
-                perform { if (scoped?.active != false) it.setup() }
+                it.setup()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
                 e.printStackTrace()
-                if (scoped != null) {
-                    scoped.requestEnd(ScopedCinematicOutcome.FAILED)
-                    return failure("Could not set up scoped cinematic ${pageId}")
-                }
             }
         }
-        if (scoped?.active == false) return failure("Scoped cinematic ended during setup")
 
         state = PLAYING
 
@@ -99,7 +90,7 @@ class TemporalInteraction(
     }
 
     override suspend fun tick(deltaTime: Duration) {
-        if (state != PLAYING || scoped?.active == false) return
+        if (state != PLAYING) return
         if (canEnd) {
             // The clock was moved past the last frame between ticks (TemporalSetFrameTrigger): still end the
             // cinematic, once. Without this the interaction would idle here forever.
@@ -114,19 +105,17 @@ class TemporalInteraction(
         coroutineScope {
             actions.map {
                 launch {
-                    if (scoped?.active == false) return@launch
                     try {
-                        perform { if (scoped?.active != false) it.tick(frame) }
+                        it.tick(frame)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (e: Exception) {
                         e.printStackTrace()
-                        scoped?.requestEnd(ScopedCinematicOutcome.FAILED)
                     }
                 }
             }.joinAll()
         }
-        if (scoped?.active != false) AsyncCinematicTickEvent(player, frame).callEvent()
+        AsyncCinematicTickEvent(player, frame).callEvent()
 
         if (canEnd) requestStop()
     }
@@ -134,22 +123,22 @@ class TemporalInteraction(
     private val canEnd get() = actions.all { it.canFinish(frame) }
     /** The stop trigger has been fired for this interaction; it must not fire twice (the page triggers would double). */
     private var stopRequested = false
-
-    private suspend fun perform(action: suspend () -> Unit) {
-        if (scoped == null) action()
-        else Dispatchers.Sync.switchContext { action() }
-    }
+    /** The page reached its last frame (not stopped from outside). */
+    private var completed = false
 
     private fun requestStop() {
         if (stopRequested) return
         stopRequested = true
-        if (scoped == null) TemporalStopTrigger.triggerFor(player, context)
-        else scoped.requestEnd(ScopedCinematicOutcome.COMPLETED)
+        completed = true
+        TemporalStopTrigger.triggerFor(player, context)
     }
 
     override suspend fun teardown() {
-        if (state == ENDING || state != PLAYING && scoped == null) return
-        val started = state == PLAYING
+        if (state == ENDING) return
+        if (state != PLAYING) {
+            ended?.complete(false)
+            return
+        }
         state = ENDING
         val originalFrame = frame
 
@@ -162,20 +151,19 @@ class TemporalInteraction(
                 if (settings.blockActionBarMessages) player.stopBlockingActionBar()
             }
 
-            if (::actions.isInitialized) actions.forEach {
+            actions.forEach {
                 try {
-                    perform { it.teardown() }
+                    it.teardown()
                 } catch (e: Exception) {
                     e.printStackTrace()
-                    scoped?.requestEnd(ScopedCinematicOutcome.FAILED)
                 }
             }
 
-            if (started) Dispatchers.UntickedAsync.switchContext {
+            Dispatchers.UntickedAsync.switchContext {
                 AsyncCinematicEndEvent(player, originalFrame, pageId).callEvent()
             }
         } finally {
-            scoped?.finish(ScopedCinematicOutcome.CANCELLED)
+            ended?.complete(completed)
         }
     }
 
@@ -218,6 +206,8 @@ data class TemporalStartTrigger(
     val pageId: String,
     val eventTriggers: List<EventTrigger> = emptyList(),
     val settings: TemporalSettings = TemporalSettings(),
+    /** Told once whether the page played to its end; see [CinematicPlayback]. */
+    val ended: CompletableFuture<Boolean>? = null,
 ) : EventTrigger {
     val priority: Int by lazy(LazyThreadSafetyMode.NONE) { Query.findPageById(pageId)?.priority ?: 0 }
 

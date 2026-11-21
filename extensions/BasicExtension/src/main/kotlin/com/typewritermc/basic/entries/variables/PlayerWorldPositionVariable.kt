@@ -10,6 +10,7 @@ import com.typewritermc.core.utils.point.Coordinate
 import com.typewritermc.core.utils.point.Position
 import com.typewritermc.core.utils.point.toPosition
 import com.typewritermc.engine.paper.entry.entries.*
+import com.typewritermc.engine.paper.utils.mapPlace
 import com.typewritermc.engine.paper.utils.position
 
 @Entry(
@@ -26,6 +27,9 @@ import com.typewritermc.engine.paper.utils.position
  * ## How could this be used?
  * This could be used in dungeons where the players will be in a different world for paper,
  * but the world coordinates are the same.
+ *
+ * The coordinate is one of the map the player is on: a player in a dungeon run plays a copy of the map placed
+ * elsewhere, and the coordinate lands in that copy (MapPlaces). In the open world it is the coordinate itself.
  */
 class PlayerWorldPositionVariable(
     override val id: String = "",
@@ -35,7 +39,7 @@ class PlayerWorldPositionVariable(
         val player = context.player
         val data = context.getData<PlayerWorldPositionVariableData>()
             ?: throw ContextDataNotFoundException(context.klass, context.data)
-        val position = data.coordinate.get(player, context.interactionContext).toPosition(player.position.world)
+        val position = player.mapPlace(data.coordinate.get(player, context.interactionContext).toPosition(player.position.world))
 
         return context.safeCast(position)
             ?: throw IllegalStateException("Could not cast position to ${context.klass}, PlayerWorldPositionVariable is only compatible with Position fields")

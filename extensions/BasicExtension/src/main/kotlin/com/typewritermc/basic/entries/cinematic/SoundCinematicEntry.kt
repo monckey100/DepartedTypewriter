@@ -26,7 +26,7 @@ class SoundCinematicEntry(
     override val criteria: List<Criteria> = emptyList(),
     @Segments(icon = "fa6-solid:music", color = Colors.YELLOW)
     val segments: List<SoundSegment> = emptyList(),
-) : ScopedCinematicEntry {
+) : CinematicEntry {
     override fun create(player: Player): CinematicAction {
         return SoundCinematicAction(
             player,

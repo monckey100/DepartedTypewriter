@@ -29,7 +29,7 @@ class TitleCinematicEntry(
     override val criteria: List<Criteria> = emptyList(),
     @Segments(icon = "fluent:align-center-vertical-32-filled")
     val segments: List<TitleSegment> = emptyList(),
-) : PrimaryCinematicEntry, ScopedCinematicEntry {
+) : PrimaryCinematicEntry {
     override fun create(player: Player): CinematicAction {
         return TitleCinematicAction(
             player,

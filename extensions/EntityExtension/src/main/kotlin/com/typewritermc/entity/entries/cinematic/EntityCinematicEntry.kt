@@ -15,6 +15,7 @@ import com.typewritermc.core.utils.failure
 import com.typewritermc.core.utils.ok
 import com.typewritermc.core.utils.point.Coordinate
 import com.typewritermc.core.utils.point.distanceSquared
+import com.typewritermc.core.utils.point.toPosition
 import com.typewritermc.engine.paper.content.ContentContext
 import com.typewritermc.engine.paper.content.ContentMode
 import com.typewritermc.engine.paper.content.components.cinematic
@@ -33,6 +34,7 @@ import com.typewritermc.engine.paper.interaction.interceptPackets
 import com.typewritermc.engine.paper.utils.toBukkitLocation
 import com.typewritermc.engine.paper.utils.toCoordinate
 import com.typewritermc.engine.paper.utils.toWorld
+import com.typewritermc.engine.paper.utils.mapPlace
 import com.typewritermc.entity.entries.data.minecraft.*
 import com.typewritermc.entity.entries.data.minecraft.living.DamagedProperty
 import com.typewritermc.entity.entries.data.minecraft.living.EquipmentProperty
@@ -138,7 +140,7 @@ class EntityCinematicAction(
         this.lastRelativeFrame = 0
 
         val prioritizedPropertySuppliers = definition.data.withPriority() +
-                (FakeProvider(PositionProperty::class) { streamer?.currentFrame()?.location?.toProperty(player.world.toWorld()) } to Int.MAX_VALUE) +
+                (FakeProvider(PositionProperty::class) { streamer?.currentFrame()?.location?.let { player.mapPlace(it.toPosition(player.world.toWorld())) }?.toProperty() } to Int.MAX_VALUE) +
                 (FakeProvider(PoseProperty::class) { streamer?.currentFrame()?.pose?.toProperty() } to 1000) +
                 (FakeProvider(ArmSwingProperty::class) { streamer?.currentFrame()?.swing?.toProperty() } to Int.MAX_VALUE) +
                 (FakeProvider(DamagedProperty::class) { DamagedProperty(streamer?.currentFrame()?.damaged == true) } to Int.MAX_VALUE) +
@@ -166,7 +168,7 @@ class EntityCinematicAction(
         val startLocation = streamer?.currentFrame()?.location ?: return
         val collectedProperties = collectors.mapNotNull { it.collect(player) }
 
-        this.entity?.spawn(startLocation.toProperty(player.world.toWorld()))
+        this.entity?.spawn(player.mapPlace(startLocation.toPosition(player.world.toWorld())).toProperty())
         this.entity?.consumeProperties(collectedProperties)
     }
 
