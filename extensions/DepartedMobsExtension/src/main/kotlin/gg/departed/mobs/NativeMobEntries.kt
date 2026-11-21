@@ -231,10 +231,12 @@ class MobCountFact(
 /**
  * The `Spawn MythicMob Cinematic` cinematic entry shows a mob's model during a cinematic, to the viewer only.
  *
- * The actor is the model of the named native mob type, standing still at the segment's place with its `idle`
- * animation when it has one; no living mob is made, so it neither fights nor thinks. It is taken away when the
- * segment ends or the cinematic stops. An unknown type, or a type whose model the engine lacks, shows nothing and
- * logs one warning.
+ * The actor is the model of the named native mob type, drawn at the type's model scale (the old actor's scale),
+ * standing still at the segment's place with its `idle` animation when it has one; no living mob is made, so it neither
+ * fights nor thinks. A type whose brain plays its attacks in order (an actor such as q69_famine_actor) plays the
+ * animations of that list one after the other, each for its attack's length, from the segment's first frame: the old
+ * actor's state timeline. It is taken away when the segment ends or the cinematic stops. An unknown type, or a type whose
+ * model the engine lacks, shows nothing and logs one warning.
  */
 class MythicMobCinematicEntry(
     override val id: String = "",
@@ -263,6 +265,9 @@ class MobCinematicAction(
 
     private val entryId = entry.id
     private var model: ModelInstance? = null
+    /** The frames from the segment's start at which the actor's next animations begin, with their names. */
+    private var timeline: List<Pair<Int, String>> = emptyList()
+    private var played = 0
 
     override suspend fun startSegment(segment: MythicMobSegment) {
         super.startSegment(segment)
@@ -278,13 +283,44 @@ class MobCinematicAction(
             val place = segment.location.get(player).toBukkitLocation()
             val shown = DepartedModelsAPI.spawn(type.model(), place, place.yaw) ?: return@switchContext
             shown.restrictTo(setOf(player.uniqueId))
+            if (type.modelScale() != 1.0) shown.setSize(type.modelScale().toFloat())
             if (shown.model.animations.containsKey("idle")) shown.setBase("idle", 0f)
+            val attacks = type.brain().attacks()
+            val steps = mutableListOf<Pair<Int, String>>()
+            if (!attacks.weighted()) {
+                var at = 0
+                for (choice in attacks.list()) {
+                    val ability = type.abilities()[choice.ability()] ?: continue
+                    steps.add(at to ability.animation())
+                    at += ability.length()
+                }
+            }
+            timeline = steps
+            played = 0
             model = shown
+            playDue(0)
+        }
+    }
+
+    override suspend fun tickSegment(segment: MythicMobSegment, frame: Int) {
+        super.tickSegment(segment, frame)
+        if (played >= timeline.size) return
+        Dispatchers.Sync.switchContext { playDue(frame - segment.startFrame) }
+    }
+
+    /** Plays every animation of the actor's timeline whose frame has come and that has not played yet. */
+    private fun playDue(sinceStart: Int) {
+        val shown = model ?: return
+        while (played < timeline.size && timeline[played].first <= sinceStart) {
+            val name = timeline[played].second
+            if (shown.model.animations.containsKey(name)) shown.controller.play(name, 0.1f, 0.1f, 1f)
+            played++
         }
     }
 
     override suspend fun stopSegment(segment: MythicMobSegment) {
         super.stopSegment(segment)
+        timeline = emptyList()
 
         val shown = model ?: return
         model = null
