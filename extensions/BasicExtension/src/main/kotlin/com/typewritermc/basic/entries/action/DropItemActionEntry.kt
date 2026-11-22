@@ -49,7 +49,9 @@ class DropItemActionEntry(
         val item = item.get(player, context).build(player, context)
         // Run on main thread
         Dispatchers.Sync.launch {
-            location.world.dropItem(location, item)
+            location.world.dropItem(location, item) { dropped ->
+                com.typewritermc.basic.itemcore.ItemCoreBridge.claim(dropped, player.uniqueId)
+            }
         }
     }
 }

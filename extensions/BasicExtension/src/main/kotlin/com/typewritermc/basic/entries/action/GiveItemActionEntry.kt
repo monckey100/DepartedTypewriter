@@ -61,7 +61,9 @@ class GiveItemActionEntry(
             }
             val leftOver = player.inventory.addItem(itemStack)
             leftOver.values.forEach {
-                player.world.dropItemNaturally(player.location, it)
+                player.world.dropItemNaturally(player.location, it) { dropped ->
+                    com.typewritermc.basic.itemcore.ItemCoreBridge.claim(dropped, player.uniqueId)
+                }
             }
             if (leftOver.isNotEmpty()) {
                 player.sendMessage(dropMessage.parsePlaceholders(player).asMini())

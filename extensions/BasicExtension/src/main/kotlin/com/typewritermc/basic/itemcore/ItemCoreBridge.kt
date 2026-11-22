@@ -19,6 +19,15 @@ import org.bukkit.inventory.ItemStack
 object ItemCoreBridge {
     const val PLUGIN = "DepartedItemCore"
 
+    /**
+     * Names who caused a real entity this extension makes (an item it drops for a player), so that in a dungeon it
+     * belongs to that player's run and only that run sees it (DepartedItemCore `InstancedRuns.claim`). Does nothing
+     * without the core.
+     */
+    fun claim(entity: org.bukkit.entity.Entity, cause: java.util.UUID) {
+        if (server.pluginManager.isPluginEnabled(PLUGIN)) CoreAccess.claim(entity, cause)
+    }
+
     /** [any] True while DepartedItemCore is enabled in custody mode. */
     val active: Boolean
         get() = server.pluginManager.isPluginEnabled(PLUGIN) && CoreAccess.custody()

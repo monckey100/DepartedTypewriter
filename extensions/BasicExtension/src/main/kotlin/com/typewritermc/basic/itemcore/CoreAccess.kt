@@ -28,6 +28,10 @@ import java.util.concurrent.ConcurrentHashMap
  * [ItemCoreBridge.active] said the core is there, so the JVM never resolves a core class on a server without it.
  */
 internal object CoreAccess {
+    fun claim(entity: org.bukkit.entity.Entity, cause: UUID) {
+        dev.departed.itemcore.api.spi.InstancedRuns.get().claim(entity, cause)
+    }
+
     private val core: ItemCore get() = ItemCore.get()
 
     fun custody(): Boolean = runCatching {

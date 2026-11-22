@@ -168,6 +168,8 @@ object DialogueMountControl {
 
     private fun spawnStand(player: Player, loc: Location): ArmorStand =
         (player.world.spawnEntity(loc, EntityType.ARMOR_STAND) as ArmorStand).apply {
+            // in a dungeon the seat belongs to the player's run
+            dev.departed.itemcore.api.spi.InstancedRuns.get().claim(this, player.uniqueId)
             isSilent = true
             isInvisible = true
             isInvulnerable = true

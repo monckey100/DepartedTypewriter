@@ -167,7 +167,9 @@ class ItemSlotBinderDisplay(
                 SlotReplacementStrategy.MOVE_OR_DROP -> {
                     player.sendMessage("<red>Some items got dropped because the inventory is full.".asMini())
                     // TODO: Make the player drop the item possible from 1.21.4 onwards
-                    player.world.dropItem(player.location, currentItem)
+                    player.world.dropItem(player.location, currentItem) { dropped ->
+                        com.typewritermc.basic.itemcore.ItemCoreBridge.claim(dropped, player.uniqueId)
+                    }
                 }
 
                 SlotReplacementStrategy.MOVE_OR_REPLACE -> resetItem = currentItem
