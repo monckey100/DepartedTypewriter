@@ -230,12 +230,12 @@ class MobCountFact(
 /**
  * The `Spawn MythicMob Cinematic` cinematic entry shows a cutscene actor during a cinematic, to the viewer only.
  *
- * The actor is the model of the named native mob type, played by DepartedMobs (its `Actors`): it appears at the
- * segment's place when the segment starts and does what the type's `script` says (the old actor's spawn skills: its
- * animations, sounds and cues, moves and turns) on the server clock from that moment, or, without a script, plays its
- * brain's attack list in order. No living mob is made, so it neither fights nor thinks. It is taken away when the
- * segment ends or the cinematic stops, or earlier by its own script. An unknown type, or a type whose model the engine
- * lacks, shows nothing and DepartedMobs logs one warning.
+ * The actor is the look of the named native mob type (its model, or the vanilla entity of a `vanilla/<entity>` type),
+ * played by DepartedMobs (its `Actors`): it appears at the segment's place when the segment starts and does what the
+ * type's `script` says (the old actor's skills: its animations, sounds and cues, moves and turns, summons, thrown things)
+ * on the server clock from that moment. No living mob is made, so it neither fights nor thinks. It is taken away when
+ * the segment ends or the cinematic stops, or earlier by its own script. An unknown type, or a type whose look the
+ * server cannot draw, shows nothing and DepartedMobs logs one warning.
  */
 class MythicMobCinematicEntry(
     override val id: String = "",
