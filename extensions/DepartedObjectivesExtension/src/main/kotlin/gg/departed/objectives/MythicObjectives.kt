@@ -55,12 +55,12 @@ fun onKillMythicMobObjective(event: MobDefeatedEvent, query: Query<KillMythicMob
             directKiller?.let { manager.increment(it, objective) }
         } else {
             // Dungeon/area fights: credit every questing player in the mob's world, so mobs finished
-            // off by NPCs/clones still count. A dungeon run plays in a copy inside a host world shared
-            // with other runs: there, only the players of the mob's own run count.
+            // off by NPCs/clones still count. Every run of a dungeon map stands on the same blocks of a
+            // host world: there, only the players of the mob's own run (the event names it) count.
             val world = event.at().world ?: return@forEach
-            val run = places()?.runAt(event.at())?.orElse(null)
+            val run = event.run()
             server.onlinePlayers.filter {
-                it.world == world && (run == null || places()?.runOf(it)?.orElse(null) == run)
+                it.world == world && (run == null || places()?.runOf(it)?.orElse(null)?.id() == run)
             }.forEach { manager.increment(it, objective) }
         }
     }
