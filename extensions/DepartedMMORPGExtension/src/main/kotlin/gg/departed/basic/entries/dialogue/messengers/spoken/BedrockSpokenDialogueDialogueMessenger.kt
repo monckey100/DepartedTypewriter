@@ -3,6 +3,8 @@ package gg.departed.basic.entries.dialogue.messengers.spoken
 import gg.departed.basic.entries.dialogue.DepartedLang
 import gg.departed.basic.entries.dialogue.LastSpeakerTracker
 import gg.departed.basic.entries.dialogue.SpokenDialogueEntry
+import gg.departed.basic.entries.dialogue.hud.DialoguePages
+import com.typewritermc.engine.paper.utils.asMini
 import gg.departed.basic.entries.dialogue.TalkIndicator
 import com.typewritermc.core.interaction.InteractionBoundState
 import com.typewritermc.core.interaction.InteractionContext
@@ -22,10 +24,13 @@ private val spokenButton: String by snippet("dialogue.spoken.bedrock.button", "C
 class BedrockSpokenDialogueDialogueMessenger(player: Player, context: InteractionContext, entry: SpokenDialogueEntry) :
     DialogueMessenger<SpokenDialogueEntry>(player, context, entry) {
     private val talkIndicator = TalkIndicator(player, context, entry.talkIndicator)
+    private lateinit var pages: DialoguePages
 
     override fun init() {
         super.init()
         talkIndicator.init()
+        val text = DepartedLang.tr(player, entry.text.get(player)).parsePlaceholders(player)
+        pages = DialoguePages.create(text.asMini(), "", entry.npcSpeaker.isNotBlank())
         // Remember who is talking so out-of-band NPC speech (quest-busy line) can use them.
         LastSpeakerTracker.record(
             player.uniqueId,
@@ -41,6 +46,7 @@ class BedrockSpokenDialogueDialogueMessenger(player: Player, context: Interactio
     }
 
     fun sendForm() {
+        val presentedPage = pages.index
         org.geysermc.floodgate.api.FloodgateApi.getInstance().sendForm(
             player.uniqueId,
             org.geysermc.cumulus.form.SimpleForm.builder()
@@ -51,7 +57,7 @@ class BedrockSpokenDialogueDialogueMessenger(player: Player, context: Interactio
                 )
                 .content(
                     spokenContent.parsePlaceholders(player).legacy(
-                        Placeholder.parsed("message", DepartedLang.tr(player, entry.text.get(player)).parsePlaceholders(player))
+                        Placeholder.parsed("message", pages.current.displayText)
                     )
                 )
                 .button(spokenButton.parsePlaceholders(player).legacy())
@@ -62,7 +68,8 @@ class BedrockSpokenDialogueDialogueMessenger(player: Player, context: Interactio
                     }
                 }
                 .validResultHandler { _, _ ->
-                    state = MessengerState.FINISHED
+                    if (pages.index != presentedPage) return@validResultHandler
+                    if (pages.advance()) sendForm() else state = MessengerState.FINISHED
                 }
         )
     }

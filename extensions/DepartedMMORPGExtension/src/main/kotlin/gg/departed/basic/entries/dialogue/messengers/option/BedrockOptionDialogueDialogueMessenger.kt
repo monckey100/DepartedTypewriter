@@ -1,6 +1,8 @@
 package gg.departed.basic.entries.dialogue.messengers.option
 
 import gg.departed.basic.entries.dialogue.DepartedLang
+import gg.departed.basic.entries.dialogue.hud.DialoguePages
+import com.typewritermc.engine.paper.utils.asMini
 import gg.departed.basic.entries.dialogue.Option
 import gg.departed.basic.entries.dialogue.OptionDialogueEntry
 import gg.departed.basic.entries.dialogue.OptionMarks
@@ -27,22 +29,25 @@ private val optionSelect: String by snippet("dialogue.option.bedrock.select", "S
 class BedrockOptionDialogueDialogueMessenger(player: Player, context: InteractionContext, entry: OptionDialogueEntry) :
     DialogueMessenger<OptionDialogueEntry>(player, context, entry) {
 
+    private lateinit var pages: DialoguePages
     private var selectedIndex = 0
-    private val selected get() = usableOptions[selectedIndex]
+    private val selected get() = usableOptions.getOrNull(selectedIndex)
     private val talkIndicator = TalkIndicator(player, context, entry.talkIndicator)
 
     private var usableOptions: List<Option> = emptyList()
 
     override val eventTriggers: List<EventTrigger>
-        get() = entry.eventTriggers + selected.eventTriggers
+        get() = entry.eventTriggers + (selected?.eventTriggers ?: emptyList())
 
     override val modifiers: List<Modifier>
-        get() = entry.modifiers + selected.modifiers
+        get() = entry.modifiers + (selected?.modifiers ?: emptyList())
 
 
     override fun init() {
         super.init()
         talkIndicator.init()
+        val text = DepartedLang.tr(player, entry.text.get(player)).parsePlaceholders(player)
+        pages = DialoguePages.create(text.asMini(), "", entry.npcSpeaker.isNotBlank())
         sendForm()
     }
 
@@ -51,6 +56,10 @@ class BedrockOptionDialogueDialogueMessenger(player: Player, context: Interactio
     }
 
     fun sendForm() {
+        if (pages.hasNext) {
+            sendTextForm()
+            return
+        }
         usableOptions = entry.options.filter { it.criteria.matches(player, context) }
         val pickedOptions = OptionMarks.picked(player, entry, usableOptions)
         org.geysermc.floodgate.api.FloodgateApi.getInstance().sendForm(
@@ -63,7 +72,7 @@ class BedrockOptionDialogueDialogueMessenger(player: Player, context: Interactio
                 )
                 .label(
                     optionDescription.parsePlaceholders(player).legacy(
-                        Placeholder.parsed("message", DepartedLang.tr(player, entry.text.get(player)).parsePlaceholders(player))
+                        Placeholder.parsed("message", pages.current.displayText)
                     )
                 )
                 .dropdown(
@@ -89,6 +98,33 @@ class BedrockOptionDialogueDialogueMessenger(player: Player, context: Interactio
                     usableOptions.getOrNull(dropdown)?.let { OptionMarks.markPicked(player, entry, it) }
                     state = MessengerState.FINISHED
                 }
+        )
+    }
+
+    private fun sendTextForm() {
+        val presentedPage = pages.index
+        org.geysermc.floodgate.api.FloodgateApi.getInstance().sendForm(
+            player.uniqueId,
+            org.geysermc.cumulus.form.SimpleForm.builder()
+                .title(optionTitle.parsePlaceholders(player).legacy(
+                    Placeholder.parsed("speaker", DepartedLang.tr(player, entry.speakerDisplayName.get(player))
+                        .parsePlaceholders(player)),
+                ))
+                .content(optionDescription.parsePlaceholders(player).legacy(
+                    Placeholder.parsed("message", pages.current.displayText),
+                ))
+                .button("Continue".legacy())
+                .closedOrInvalidResultHandler { _, _ ->
+                    when (player.boundState) {
+                        InteractionBoundState.BLOCKING -> sendForm()
+                        else -> state = MessengerState.CANCELLED
+                    }
+                }
+                .validResultHandler { _, _ ->
+                    if (pages.index != presentedPage) return@validResultHandler
+                    pages.advance()
+                    sendForm()
+                },
         )
     }
 

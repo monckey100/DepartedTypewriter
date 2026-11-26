@@ -22,6 +22,7 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.12.2")
     testImplementation("net.kyori:adventure-api:5.1.1")
+    testImplementation("net.kyori:adventure-text-minimessage:5.1.1")
     testImplementation("com.google.code.gson:gson:2.13.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

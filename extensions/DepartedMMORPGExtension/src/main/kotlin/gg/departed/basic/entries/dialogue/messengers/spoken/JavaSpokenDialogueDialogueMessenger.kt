@@ -8,11 +8,11 @@ import gg.departed.basic.entries.dialogue.NpcNodController
 import gg.departed.basic.entries.dialogue.SpokenDialogueEntry
 import gg.departed.basic.entries.dialogue.TalkIndicator
 import gg.departed.basic.entries.dialogue.useDialogueHud
+import gg.departed.basic.entries.dialogue.hud.DialoguePages
 import gg.departed.basic.entries.dialogue.hud.DialogueFacing
 import gg.departed.basic.entries.dialogue.hud.DialogueHudRenderer
 import gg.departed.basic.entries.dialogue.hud.DialogueNpcPortrait
 import gg.departed.basic.entries.dialogue.hud.clearDialogueHud
-import gg.departed.basic.entries.dialogue.hud.revealedHudCharacters
 import gg.departed.basic.entries.dialogue.hud.showDialogueHud
 import com.typewritermc.core.interaction.InteractionContext
 import org.bukkit.event.EventHandler
@@ -21,6 +21,8 @@ import com.typewritermc.engine.paper.extensions.placeholderapi.parsePlaceholders
 import com.typewritermc.engine.paper.interaction.chatHistory
 import com.typewritermc.engine.paper.snippets.snippet
 import com.typewritermc.engine.paper.utils.*
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.JoinConfiguration
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder
 import org.bukkit.entity.Player
 import java.time.Duration
@@ -74,6 +76,8 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
 
     private var speakerDisplayName = ""
     private var text = ""
+    private lateinit var pages: DialoguePages
+    private var pageVoiceActor = ""
     private var typingDuration = Duration.ZERO
     private var playedTime = Duration.ZERO
     private var lastHudReveal = -1
@@ -101,33 +105,17 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
         speakerDisplayName = DepartedLang.tr(player, entry.speakerDisplayName.get(player)).parsePlaceholders(player)
         val sourceText = entry.text.get(player)
         val localText = DepartedLang.tr(player, sourceText)
-        text = localText.parsePlaceholders(player)
-        StoryLog.record(player, speakerDisplayName, text)
-        typingDuration = typingDurationType.totalDuration(text.stripped(), entry.duration.get(player))
-
-        // voice settings (locals cannot be 'private')
-        val voiceActor = entry.voice.get(player)      // Voice actor
-        val voiceText  = entry.voicetext.get(player)  // Override voice text (optional)
-        val stopVoice  = entry.stopvoice.get(player)  // Stop previous talking first?
-        val cutVoice = entry.cutvoice.get(player)
-        // Choose line: voicetext if non-blank, else the regular parsed 'text'
-        val chosenVoiceLine = DepartedLang.voice(player, voiceText, sourceText, localText)
+        val fullText = localText.parsePlaceholders(player)
+        StoryLog.record(player, speakerDisplayName, fullText)
+        val chosenVoiceLine = DepartedLang.voice(player, entry.voicetext.get(player), sourceText, localText)
             .parsePlaceholders(player)
             .stripped()
-
-        stopVoiceOnAdvance = (stopVoice == true)
-        if (stopVoice == true) {
-           runSync {  Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") }
-        }
-        if (!voiceActor.isNullOrBlank() && chosenVoiceLine.isNotBlank()) {
-           runSync {
-               Bukkit.dispatchCommand(
-                   Bukkit.getConsoleSender(),
-                   "talkchar $voiceActor ${player.name} $chosenVoiceLine"
-               )
-           }
-        }
-
+        val portrait = entry.npcSpeaker.isNotBlank() ||
+            NpcNodController.resolveSpeakerId(entry.npcSpeaker, entry.speaker.get(), player) != null
+        pages = DialoguePages.create(fullText.asMini(), chosenVoiceLine, portrait)
+        pageVoiceActor = entry.voice.get(player)
+        stopVoiceOnAdvance = entry.stopvoice.get(player) == true
+        startPage(stopVoiceOnAdvance)
 
         confirmationKeyHandler = confirmationKey.handler(player) { advance() }
 
@@ -142,13 +130,34 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
             hudPortrait?.show(nodNpcId, DialogueFacing.resolve(entry.portraitFacing, nodNpcId))
             NpcNodController.start(nodNpcId, player, (typingDuration.toMillis() / 50L).toInt().coerceAtLeast(1))
             // Remember who is talking so out-of-band NPC speech (quest-busy line) can use them.
-            LastSpeakerTracker.record(player.uniqueId, speakerDisplayName, voiceActor ?: "", nodNpcId)
+            LastSpeakerTracker.record(player.uniqueId, speakerDisplayName, pageVoiceActor, nodNpcId)
+        }
+    }
+
+    private fun startPage(stopPrevious: Boolean) {
+        text = pages.current.text
+        typingDuration = typingDurationType.totalDuration(text.stripped(), pages.duration(entry.duration.get(player)))
+        playedTime = Duration.ZERO
+        lastHudReveal = -1
+        lastHudSentAt = Duration.ZERO
+        val voice = pages.current.voice
+        val ticks = (typingDuration.toMillis() / 50L).toInt().coerceAtLeast(1)
+        runSync {
+            if (stopPrevious) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}")
+            if (pageVoiceActor.isNotBlank() && voice.isNotBlank()) {
+                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "talkchar $pageVoiceActor ${player.name} $voice")
+            }
+            if (nodNpcId != null) NpcNodController.start(nodNpcId, player, ticks)
         }
     }
 
     /** Advance/finish this spoken line (shared by the confirmation key and the seated-mount packet). */
     private fun advance() {
         if (state != MessengerState.RUNNING) return
+        if (animationComplete && pages.advance()) {
+            startPage(pageVoiceActor.isNotBlank())
+            return
+        }
         if (stopVoiceOnAdvance) {
             runSync { Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "stoptalk ${player.name}") }
         }
@@ -222,17 +231,19 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
         playedTime += context.deltaTime
         hudPortrait?.tick(!animationComplete)
         if (hudEnabled) {
-            val body = text.asMini()
-            val percentage = typingDurationType.calculatePercentage(playedTime, entry.duration.get(player), text.stripped())
-            val revealed = revealedHudCharacters(body, percentage)
+            val body = pages.current.body
+            val percentage = typingDurationType.calculatePercentage(
+                playedTime, pages.duration(entry.duration.get(player)), text.stripped(),
+            )
+            val revealed = pages.current.revealedCharacters(percentage)
             if (animationComplete && !firstFrame && revealed == lastHudReveal &&
                 (playedTime - lastHudSentAt).toMillis() < 1_000L) return
-            val action = if (eventTriggers.isEmpty()) "finish" else "continue"
+            val action = if (eventTriggers.isEmpty() && !pages.hasNext) "finish" else "continue"
             player.showDialogueHud(DialogueHudRenderer.render(
                 speaker = speakerDisplayName.asMini(),
                 body = body,
                 revealedCharacters = revealed,
-                hint = "<gold>Jump / Shift</gold><gray> to $action</gray>".asMini(),
+                hint = "<gold>Jump / Shift</gold><gray> to $action${pages.hint}</gray>".asMini(),
                 elapsedMillis = playedTime.toMillis(),
                 completedBodyMillis = (playedTime - typingDuration).toMillis().coerceAtLeast(0L),
                 portrait = hudPortrait?.shown ?: entry.npcSpeaker.isNotBlank(),
@@ -244,9 +255,11 @@ class JavaSpokenDialogueDialogueMessenger(player: Player, context: InteractionCo
         player.sendSpokenDialogue(
             text,
             speakerDisplayName,
-            entry.duration.get(player),
+            pages.duration(entry.duration.get(player)),
             playedTime,
-            eventTriggers.isEmpty()
+            eventTriggers.isEmpty() && !pages.hasNext,
+            pages.current.recap,
+            pages.hint,
         )
     }
 
@@ -271,7 +284,9 @@ fun Player.sendSpokenDialogue(
     speakerDisplayName: String,
     duration: Duration,
     playTime: Duration,
-    canFinish: Boolean
+    canFinish: Boolean,
+    recap: String = "",
+    pageHint: String = "",
 ) {
     val rawText = text.stripped()
     val playedTicks = playTime.toTicks()
@@ -298,18 +313,26 @@ fun Player.sendSpokenDialogue(
 
     val resultingLines = rawText.limitLineLength(spokenMaxLineLength).lineCount
 
-    val message = text.asPartialFormattedMini(
+    val fresh = text.asPartialFormattedMini(
         percentage,
         padding = spokenPadding,
         minLines = spokenMinLines.coerceAtLeast(resultingLines),
         maxLineLength = spokenMaxLineLength
     )
 
+    val message = if (recap.isBlank()) fresh else Component.join(
+        JoinConfiguration.noSeparators(), listOf(
+            recap.asPartialFormattedMini(1.0, padding = spokenPadding, minLines = 0,
+                maxLineLength = spokenMaxLineLength),
+            Component.newline(), fresh,
+        ),
+    )
+
     val component = spokenFormat.asMiniWithResolvers(
         Placeholder.parsed("speaker", speakerDisplayName),
         Placeholder.component("message", message),
         Placeholder.parsed("next_color", nextColor),
-        Placeholder.parsed("finish_text", continueOrFinish),
+        Placeholder.parsed("finish_text", continueOrFinish + pageHint),
         Placeholder.parsed("padding", spokenPadding)
     )
 
