@@ -145,8 +145,13 @@ class DialogueMountGuard : Initializable, Listener {
     }
 
     // Exit: warped away (world change or a long teleport — walking is locked, so any real distance is a warp).
-    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    // LOWEST, so the stand is gone before region plugins read the teleport: Paper dismounts a rider only
+    // AFTER the teleport event, and that dismount is a teleport (DISMOUNT) back to the stand. WorldGuard
+    // then kept Lumbridge as the last valid spot, and the first step in the new world counted as leaving
+    // the Lumbridge region (exit: deny) -> back to Lumbridge ("You will drown...", Darrick's hell warp).
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
     fun onTeleport(event: PlayerTeleportEvent) {
+        if (event.cause == PlayerTeleportEvent.TeleportCause.DISMOUNT) return
         val held = DialogueMountControl.heldStand(event.player.uniqueId) ?: return
         val to = event.to
         if (to.world != held.world || to.distanceSquared(held.location) > WARP_DISTANCE_SQ) {
